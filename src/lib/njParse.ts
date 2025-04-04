@@ -48,7 +48,7 @@ interface Vertex {
 
 // Better organized vertex storage
 class VertexList {
-  private vertices: Vertex[] = [];
+  private vertices: (Vertex | null)[] = [];
 
   addVertex(vertex: Vertex, index: number): void {
     // Ensure array is large enough
@@ -860,6 +860,7 @@ interface ParsedNinjaModel {
   materials?: MaterialOptions[];
   materialIndices?: number[]; // Material index for each triangle/face
   bones?: Bone[];
+  clips?: AnimationClip[];
 }
 
 interface MotionData {
@@ -1187,7 +1188,9 @@ const parseNinjaModel = (buffer: ArrayBuffer): ParsedNinjaModel => {
       if (!result.bones) {
         continue;
       }
-      const anim = readAnimation(chunk, bones);
+      const anim = readAnimation(chunk, result.bones);
+      result.clips = result.clips || [];
+      result.clips.push(anim);
     } else if (magic === "POF0") {
       continue;
     } else {
