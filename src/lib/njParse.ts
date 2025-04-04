@@ -878,7 +878,7 @@ interface MotionEntry {
   quat?: MotionData;
 }
 
-const readAnimation = (reader: ByteReader, bones: Bone[]) => {
+const readAnimation = (reader: ByteReader, bones: Bone[], num: number) => {
   const motionOfs = reader.readUInt32();
   const nbFrame = reader.readUInt32();
   const motionType = reader.readUInt16();
@@ -1155,7 +1155,11 @@ const readAnimation = (reader: ByteReader, bones: Bone[]) => {
   }
 
   // Create the final animation clip
-  const clip = new AnimationClip("anim_000", duration, tracks);
+  const clip = new AnimationClip(
+    `anim_${num.toString().padStart(3, "0")}`,
+    duration,
+    tracks,
+  );
   clip.optimize();
   return clip;
 };
@@ -1188,8 +1192,8 @@ const parseNinjaModel = (buffer: ArrayBuffer): ParsedNinjaModel => {
       if (!result.bones) {
         continue;
       }
-      const anim = readAnimation(chunk, result.bones);
       result.clips = result.clips || [];
+      const anim = readAnimation(chunk, result.bones, result.clips.length);
       result.clips.push(anim);
     } else if (magic === "POF0") {
       continue;
