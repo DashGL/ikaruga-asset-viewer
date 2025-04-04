@@ -1,4 +1,8 @@
 import {
+  AnimationClip,
+  VectorKeyframeTrack,
+  QuaternionKeyframeTrack,
+  NormalAnimationBlendMode,
   Bone,
   Vector3,
   Euler,
@@ -12,6 +16,7 @@ import {
   Material,
   DoubleSide,
 } from "three";
+import type { AnimationClipJSON } from "three";
 import ByteReader from "bytereader";
 
 interface MaterialOptions {
@@ -1035,7 +1040,123 @@ const readAnimation = (reader: ByteReader, bones: Bone[]) => {
     }
   });
 
-  return motionList;
+  const duration = (nbFrame - 1) / 30;
+
+  // With a tracks array that will store our KeyframeTracks
+  const tracks = [];
+
+  for (let i = 0; i < bones.length; i++) {
+    const bone = bones[i];
+    const motion = motionList[i];
+    const boneName = bone.name || `bone_${i}`;
+
+    // Arrays to store keyframe data for this bone
+    const times = [];
+    const positionValues = [];
+    const rotationValues = [];
+    const scaleValues = [];
+
+    // Process frames similar to your original code
+    for (let k = 0; k < nbFrame; k++) {
+      let frame = motion.frames[k];
+
+      // Skip frames with no data
+      if (!frame && k !== 0 && k !== nbFrame - 1) {
+        continue;
+      }
+
+      // Initialize frame if needed for first/last frames
+      if ((k === 0 || k === nbFrame - 1) && !frame) {
+        frame = {};
+      }
+
+      // Process position data
+      if (frame) {
+        // Record time for this keyframe
+        times.push(k / 30);
+
+        // Handle position
+        if (frame.pos) {
+          let pos = frame.pos;
+          if (typeof pos.x !== "undefined") {
+            pos = [pos.x, pos.y, pos.z];
+          }
+          positionValues.push(...pos);
+        } else if (k === 0 || k === nbFrame - 1) {
+          positionValues.push(...bone.position.toArray());
+        }
+
+        // Handle rotation
+        if (frame.rot) {
+          const obj = new Bone();
+
+          const xRotMatrix = new Matrix4();
+          xRotMatrix.makeRotationX(frame.rot.x);
+          obj.applyMatrix4(xRotMatrix);
+
+          const yRotMatrix = new Matrix4();
+          yRotMatrix.makeRotationY(frame.rot.y);
+          obj.applyMatrix4(yRotMatrix);
+
+          const zRotMatrix = new Matrix4();
+          zRotMatrix.makeRotationZ(frame.rot.z);
+          obj.applyMatrix4(zRotMatrix);
+
+          const quat = new Quaternion();
+          quat.setFromRotationMatrix(obj.matrix);
+          rotationValues.push(...quat.toArray());
+        } else if (frame.quat) {
+          rotationValues.push(...frame.quat);
+        } else if (k === 0 || k === nbFrame - 1) {
+          rotationValues.push(...bone.quaternion.toArray());
+        }
+
+        // Handle scale
+        if (frame.scl) {
+          let scl = frame.scl;
+          if (typeof scl.x !== "undefined") {
+            scl = [scl.x, scl.y, scl.z];
+          }
+          scaleValues.push(...scl);
+        } else if (k === 0 || k === nbFrame - 1) {
+          scaleValues.push(...bone.scale.toArray());
+        }
+      }
+    }
+
+    // Create and add tracks for this bone if we have keyframe data
+    if (positionValues.length > 0) {
+      const posTrack = new VectorKeyframeTrack(
+        `${boneName}.position`,
+        times,
+        positionValues,
+      );
+      tracks.push(posTrack);
+    }
+
+    if (rotationValues.length > 0) {
+      const rotTrack = new QuaternionKeyframeTrack(
+        `${boneName}.quaternion`,
+        times,
+        rotationValues,
+      );
+      tracks.push(rotTrack);
+    }
+
+    if (scaleValues.length > 0) {
+      const sclTrack = new VectorKeyframeTrack(
+        `${boneName}.scale`,
+        times,
+        scaleValues,
+      );
+      tracks.push(sclTrack);
+    }
+  }
+
+  // Create the final animation clip
+  const clip = new AnimationClip("anim_000", duration, tracks);
+  clip.optimize();
+  return clip;
 };
 
 const parseNinjaModel = (buffer: ArrayBuffer): ParsedNinjaModel => {
