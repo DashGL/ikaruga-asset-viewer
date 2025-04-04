@@ -44,7 +44,7 @@ interface Vertex {
 // Better organized vertex storage
 class VertexList {
   private vertices: Vertex[] = [];
-  
+
   addVertex(vertex: Vertex, index: number): void {
     // Ensure array is large enough
     while (this.vertices.length <= index) {
@@ -52,24 +52,24 @@ class VertexList {
     }
     this.vertices[index] = vertex;
   }
-  
+
   getVertex(index: number): Vertex | null {
     if (index < 0 || index >= this.vertices.length) {
       return null;
     }
     return this.vertices[index];
   }
-  
+
   setUV(index: number, u: number, v: number): void {
     if (index >= 0 && index < this.vertices.length && this.vertices[index]) {
       this.vertices[index].uv = { x: u, y: v };
     }
   }
-  
+
   getAllVertices(): Vertex[] {
-    return this.vertices.filter(v => v !== null);
+    return this.vertices.filter((v) => v !== null);
   }
-  
+
   getTriangleData(indices: number[]): {
     positions: number[];
     normals: number[];
@@ -84,40 +84,40 @@ class VertexList {
     const uvs: number[] = [];
     const skinIndices: number[] = [];
     const skinWeights: number[] = [];
-    
+
     // Process each index and extract data
     for (const idx of indices) {
       const vertex = this.getVertex(idx);
       if (!vertex) continue;
-      
+
       // Add position
       positions.push(vertex.position.x, vertex.position.y, vertex.position.z);
-      
+
       // Add normal if exists
       if (vertex.normal) {
         normals.push(vertex.normal.x, vertex.normal.y, vertex.normal.z);
       }
-      
+
       // Add color if exists
       if (vertex.color) {
         const alpha = vertex.color.a < 0.3 ? 0.3 : vertex.color.a; // Ensure minimum alpha
         colors.push(vertex.color.r, vertex.color.g, vertex.color.b, alpha);
       }
-      
+
       // Add UV if exists
       if (vertex.uv) {
         uvs.push(vertex.uv.x, vertex.uv.y);
       } else {
         uvs.push(0, 0); // Default UV
       }
-      
+
       // Add skinning data if exists
       if (vertex.skinIndices && vertex.skinWeights) {
         skinIndices.push(...vertex.skinIndices);
         skinWeights.push(...vertex.skinWeights);
       }
     }
-    
+
     return { positions, normals, colors, uvs, skinIndices, skinWeights };
   }
 }
@@ -570,7 +570,7 @@ class NinjaModel {
     // Check if material already exists
     for (let i = 0; i < this.materials.length; i++) {
       const mat = this.materials[i];
-      
+
       // Check basic properties
       if (
         mat.texId === this.currentMaterial.texId &&
@@ -578,10 +578,19 @@ class NinjaModel {
         mat.doubleSide === this.currentMaterial.doubleSide
       ) {
         // Check color properties if they exist
-        const diffuseMatch = this.colorsEqual(mat.diffuseColor, this.currentMaterial.diffuseColor);
-        const specularMatch = this.colorsEqual(mat.specularColor, this.currentMaterial.specularColor);
-        const ambientMatch = this.colorsEqual(mat.ambientColor, this.currentMaterial.ambientColor);
-        
+        const diffuseMatch = this.colorsEqual(
+          mat.diffuseColor,
+          this.currentMaterial.diffuseColor,
+        );
+        const specularMatch = this.colorsEqual(
+          mat.specularColor,
+          this.currentMaterial.specularColor,
+        );
+        const ambientMatch = this.colorsEqual(
+          mat.ambientColor,
+          this.currentMaterial.ambientColor,
+        );
+
         if (diffuseMatch && specularMatch && ambientMatch) {
           return i; // Reuse existing material
         }
@@ -594,23 +603,29 @@ class NinjaModel {
       texId: this.currentMaterial.texId,
       blending: this.currentMaterial.blending,
       doubleSide: this.currentMaterial.doubleSide,
-      diffuseColor: this.currentMaterial.diffuseColor ? { ...this.currentMaterial.diffuseColor } : undefined,
-      specularColor: this.currentMaterial.specularColor ? { ...this.currentMaterial.specularColor } : undefined,
-      ambientColor: this.currentMaterial.ambientColor ? { ...this.currentMaterial.ambientColor } : undefined,
+      diffuseColor: this.currentMaterial.diffuseColor
+        ? { ...this.currentMaterial.diffuseColor }
+        : undefined,
+      specularColor: this.currentMaterial.specularColor
+        ? { ...this.currentMaterial.specularColor }
+        : undefined,
+      ambientColor: this.currentMaterial.ambientColor
+        ? { ...this.currentMaterial.ambientColor }
+        : undefined,
     });
 
     return materialIndex;
   }
-  
+
   private colorsEqual(
-    color1?: { r: number; g: number; b: number; a: number }, 
-    color2?: { r: number; g: number; b: number; a: number }
+    color1?: { r: number; g: number; b: number; a: number },
+    color2?: { r: number; g: number; b: number; a: number },
   ): boolean {
     // If both are undefined or null, they're equal
     if (!color1 && !color2) return true;
     // If only one is undefined or null, they're not equal
     if (!color1 || !color2) return false;
-    
+
     // Compare values with a small epsilon for float comparison
     const epsilon = 0.00001;
     return (
@@ -696,20 +711,28 @@ class NinjaModel {
         // Determine vertex order based on clockwise flag and index parity
         const indices = [];
         if ((clockwise && !(i % 2)) || (!clockwise && i % 2)) {
-          indices.push(strip[i].vertex.globalIndex, strip[i+2].vertex.globalIndex, strip[i+1].vertex.globalIndex);
+          indices.push(
+            strip[i].vertex.globalIndex,
+            strip[i + 2].vertex.globalIndex,
+            strip[i + 1].vertex.globalIndex,
+          );
         } else {
-          indices.push(strip[i].vertex.globalIndex, strip[i+1].vertex.globalIndex, strip[i+2].vertex.globalIndex);
+          indices.push(
+            strip[i].vertex.globalIndex,
+            strip[i + 1].vertex.globalIndex,
+            strip[i + 2].vertex.globalIndex,
+          );
         }
-        
+
         // Skip if any vertex is missing
-        if (indices.some(idx => idx === undefined)) continue;
-        
+        if (indices.some((idx) => idx === undefined)) continue;
+
         // Store material index for this triangle
         this.materialIndices.push(materialIndex);
-        
+
         // Process vertex data for this triangle
         const triangleData = this.vertexList.getTriangleData(indices);
-        
+
         // Add all data to the respective arrays
         this.vertices.push(...triangleData.positions);
         if (triangleData.normals.length > 0) {
@@ -717,9 +740,12 @@ class NinjaModel {
         }
         this.colors.push(...triangleData.colors);
         this.uvs.push(...triangleData.uvs);
-        
+
         // Add skinning data if available
-        if (triangleData.skinIndices.length > 0 && triangleData.skinWeights.length > 0) {
+        if (
+          triangleData.skinIndices.length > 0 &&
+          triangleData.skinWeights.length > 0
+        ) {
           this.skinIndices.push(...triangleData.skinIndices);
           this.skinWeights.push(...triangleData.skinWeights);
         }
@@ -728,6 +754,10 @@ class NinjaModel {
 
     this.reader.seek(expectedEnd);
     console.log("Strip end: ", this.reader.tellf());
+  }
+
+  getBones(): Bone[] {
+    return this.bones;
   }
 
   getGeometry(): BufferGeometry {
@@ -791,7 +821,7 @@ class NinjaModel {
   getMaterials(): MaterialOptions[] {
     return this.materials;
   }
-  
+
   getMaterialIndices(): number[] {
     return this.materialIndices;
   }
@@ -824,7 +854,189 @@ interface ParsedNinjaModel {
   textureNames?: string[];
   materials?: MaterialOptions[];
   materialIndices?: number[]; // Material index for each triangle/face
+  bones?: Bone[];
 }
+
+interface MotionData {
+  ofs: number;
+  num?: number;
+}
+
+interface MotionEntry {
+  bone: number;
+  parent: number;
+  frames: any[];
+  pos?: MotionData;
+  rot?: MotionData;
+  scl?: MotionData;
+  quat?: MotionData;
+}
+
+const readAnimation = (reader: ByteReader, bones: Bone[]) => {
+  const motionOfs = reader.readUInt32();
+  const nbFrame = reader.readUInt32();
+  const motionType = reader.readUInt16();
+  const motionFlag = reader.readUInt16();
+  const nbElements = motionFlag & 0x0f;
+
+  const motionList = new Array(bones.length);
+  const motionTypes = {
+    pos: motionType & 1,
+    rot: motionType & 2,
+    scl: motionType & 4,
+    quat: motionType & 0x2000,
+  };
+
+  reader.seekEnd(0);
+  const length = reader.tell();
+
+  reader.seek(motionOfs);
+  let firstOfs = length;
+
+  for (let i = 0; i < bones.length; i++) {
+    let motionEntry: MotionEntry = {
+      bone: i,
+      parent: i - 1,
+      frames: [],
+    };
+
+    if (reader.tell() === firstOfs) {
+      motionList[i] = motionEntry;
+      continue;
+    }
+
+    // Read the offset to each list
+    for (const key of Object.keys(motionTypes) as Array<
+      keyof typeof motionTypes
+    >) {
+      if (!motionTypes[key]) {
+        continue;
+      }
+
+      const ofs = reader.readUInt32(); // Assuming this is the correct method
+      if (ofs && ofs < firstOfs) {
+        firstOfs = ofs;
+      }
+
+      // Type-safe property access
+      motionEntry[key] = { ofs };
+    }
+
+    // Read the number of entries for each list
+    for (const key of Object.keys(motionTypes) as Array<
+      keyof typeof motionTypes
+    >) {
+      if (!motionTypes[key]) {
+        continue;
+      }
+
+      let num = reader.readUInt32(); // Assuming this is the correct method
+
+      if (num === 0) {
+        delete motionEntry[key];
+      } else {
+        // Type-safe property access
+        if (motionEntry[key]) {
+          motionEntry[key].num = num;
+        }
+      }
+    }
+
+    motionList[i] = motionEntry;
+  }
+
+  motionList.forEach((motion) => {
+    // Read Position
+
+    if (motion.pos) {
+      reader.seek(motion.pos.ofs);
+
+      for (let i = 0; i < motion.pos.num; i++) {
+        const frameNo = reader.readUInt32();
+        const pos = {
+          x: reader.readFloat(),
+          y: reader.readFloat(),
+          z: reader.readFloat(),
+        };
+
+        if (!motion.frames[frameNo]) {
+          motion.frames[frameNo] = {};
+        }
+
+        motion.frames[frameNo].pos = pos;
+      }
+
+      delete motion.pos;
+    }
+
+    // Read Rotation
+    if (motion.rot) {
+      reader.seek(motion.rot.ofs);
+
+      for (let i = 0; i < motion.rot.num; i++) {
+        const frameNo = reader.readUInt32();
+        const rot = {
+          x: reader.readInt32() * ((2 * Math.PI) / 0xffff),
+          y: reader.readInt32() * ((2 * Math.PI) / 0xffff),
+          z: reader.readInt32() * ((2 * Math.PI) / 0xffff),
+        };
+
+        if (!motion.frames[frameNo]) {
+          motion.frames[frameNo] = {};
+        }
+
+        motion.frames[frameNo].rot = rot;
+      }
+
+      delete motion.rot;
+    }
+
+    if (motion.quat) {
+      reader.seek(motion.quat.ofs);
+
+      for (let i = 0; i < motion.quat.num; i++) {
+        const frameNo = reader.readUInt32();
+        const w = reader.readFloat();
+        const x = reader.readFloat();
+        const y = reader.readFloat();
+        const z = reader.readFloat();
+
+        if (!motion.frames[frameNo]) {
+          motion.frames[frameNo] = {};
+        }
+
+        motion.frames[frameNo].quat = [x, y, z, w];
+      }
+
+      delete motion.quat;
+    }
+
+    // Read Scale
+
+    if (motion.scl) {
+      reader.seek(motion.scl.ofs);
+
+      for (let i = 0; i < motion.scl.num; i++) {
+        const frameNo = reader.readUInt32();
+        const scl = {
+          x: reader.readFloat(),
+          y: reader.readFloat(),
+          z: reader.readFloat(),
+        };
+
+        if (!motion.frames[frameNo]) {
+          motion.frames[frameNo] = {};
+        }
+
+        motion.frames[frameNo].scl = scl;
+      }
+
+      delete motion.scl;
+    }
+  });
+
+  return motionList;
+};
 
 const parseNinjaModel = (buffer: ArrayBuffer): ParsedNinjaModel => {
   console.log("Parsing Ninja model");
@@ -848,6 +1060,13 @@ const parseNinjaModel = (buffer: ArrayBuffer): ParsedNinjaModel => {
       result.geometry = model.getGeometry();
       result.materials = model.getMaterials();
       result.materialIndices = model.getMaterialIndices();
+      result.bones = model.getBones();
+    } else if (magic === "NMDM") {
+      console.log("FOUND ANIMATION!!!!!");
+      if (!result.bones) {
+        continue;
+      }
+      const anim = readAnimation(chunk, bones);
     } else if (magic === "POF0") {
       continue;
     } else {
