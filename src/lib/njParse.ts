@@ -950,7 +950,7 @@ const readAnimation = (reader: ByteReader, bones: Bone[], num: number) => {
     motionList.push(item);
   }
 
-  const tracks: VectorKeyframeTrack[] = [];
+  const tracks: VectorKeyframeTrack | QuaternionKeyframeTrack[] = [];
   // Go through and read the position track values
   motionList.forEach(({ posOffset, posCount }, index) => {
     if (posCount === 0) {
@@ -974,6 +974,88 @@ const readAnimation = (reader: ByteReader, bones: Bone[], num: number) => {
     const posTrack = new VectorKeyframeTrack(name, times, positionValues);
     tracks.push(posTrack);
   });
+
+  // Go through and read the position track values
+  motionList.forEach((item, index) => {
+    const { rotCount, rotSmallCount, quatCount } = item;
+    const { rotOffset, rotSmallOffset, quatOffset } = item;
+
+    const bone = bones[index];
+    const name = `${bone.name}.quaternion`;
+    const times: number[] = [];
+    const rotValues: number[] = [];
+    if (rotCount) {
+      reader.seek(rotOffset);
+      for (let i = 0; i < rotCount; i++) {
+        const time = reader.readUInt32() / 30;
+        times.push(time);
+        const x = reader.readInt32() * ((2 * Math.PI) / 0xffff);
+        const y = reader.readInt32() * ((2 * Math.PI) / 0xffff);
+        const z = reader.readInt32() * ((2 * Math.PI) / 0xffff);
+        const euler = new Euler(x, y, z, "XYZ");
+        const quat = new Quaternion().setFromEuler(euler);
+        rotValues.push(quat.x, quat.y, quat.z, quat.w);
+      }
+    } else if (rotSmallCount) {
+      reader.seek(rotSmallOffset);
+      for (let i = 0; i < rotSmallOffset; i++) {
+        const time = reader.readUInt32() / 30;
+        times.push(time);
+        const x = reader.readInt16() * ((2 * Math.PI) / 0xffff);
+        const y = reader.readInt16() * ((2 * Math.PI) / 0xffff);
+        const z = reader.readInt16() * ((2 * Math.PI) / 0xffff);
+        const euler = new Euler(x, y, z, "XYZ");
+        const quat = new Quaternion().setFromEuler(euler);
+        rotValues.push(quat.x, quat.y, quat.z, quat.w);
+      }
+    } else if (quatCount) {
+      reader.seek(quatOffset);
+      for (let i = 0; i < quatCount; i++) {
+        const time = reader.readUInt32() / 30;
+        times.push(time);
+        const w = reader.readFloat();
+        const x = reader.readFloat();
+        const y = reader.readFloat();
+        const z = reader.readFloat();
+        rotValues.push(x, y, z, w);
+      }
+    }
+
+    const rotTrack = new QuaternionKeyframeTrack(name, times, rotValues);
+    tracks.push(rotTrack);
+  });
+
+  // Go through each of the scale tracks
+  motionList.forEach(({ sclOffset, sclCount }, index) => {
+    if (sclCount === 0) {
+      return;
+    }
+
+    const bone = bones[index];
+    const name = `${bone.name}.scale`;
+    reader.seek(sclOffset);
+    const times: number[] = [];
+    const scaleValues: number[] = [];
+    for (let i = 0; i < sclCount; i++) {
+      const time = reader.readUInt32() / 30;
+      times.push(time);
+      const x = reader.readFloat();
+      const y = reader.readFloat();
+      const z = reader.readFloat();
+      scaleValues.push(x, y, z);
+    }
+
+    const sclTrack = new VectorKeyframeTrack(name, times, scaleValues);
+    tracks.push(sclTrack);
+  });
+
+  const clip = new AnimationClip(
+    `anim_${num.toString().padStart(3, "0")}`,
+    duration,
+    tracks,
+  );
+  clip.optimize();
+  return clip;
 };
 
 const parseNinjaModel = (buffer: ArrayBuffer): ParsedNinjaModel => {
