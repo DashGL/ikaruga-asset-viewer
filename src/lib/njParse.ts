@@ -998,8 +998,8 @@ const readAnimation = (reader: ByteReader, bones: Bone[], num: number) => {
       }
     } else if (rotSmallCount) {
       reader.seek(rotSmallOffset);
-      for (let i = 0; i < rotSmallOffset; i++) {
-        const time = reader.readUInt32() / 30;
+      for (let i = 0; i < rotSmallCount; i++) {
+        const time = reader.readInt16() / 30;
         times.push(time);
         const x = reader.readInt16() * ((2 * Math.PI) / 0xffff);
         const y = reader.readInt16() * ((2 * Math.PI) / 0xffff);
@@ -1019,6 +1019,8 @@ const readAnimation = (reader: ByteReader, bones: Bone[], num: number) => {
         const z = reader.readFloat();
         rotValues.push(x, y, z, w);
       }
+    } else {
+      return;
     }
 
     const rotTrack = new QuaternionKeyframeTrack(name, times, rotValues);
