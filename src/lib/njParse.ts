@@ -950,7 +950,30 @@ const readAnimation = (reader: ByteReader, bones: Bone[], num: number) => {
     motionList.push(item);
   }
 
-  console.log(motionList);
+  const tracks: VectorKeyframeTrack[] = [];
+  // Go through and read the position track values
+  motionList.forEach(({ posOffset, posCount }, index) => {
+    if (posCount === 0) {
+      return;
+    }
+
+    const bone = bones[index];
+    const name = `${bone.name}.position`;
+    reader.seek(posOffset);
+    const times: number[] = [];
+    const positionValues: number[] = [];
+    for (let i = 0; i < posCount; i++) {
+      const time = reader.readUInt32() / 30;
+      times.push(time);
+      const x = reader.readFloat();
+      const y = reader.readFloat();
+      const z = reader.readFloat();
+      positionValues.push(x, y, z);
+    }
+
+    const posTrack = new VectorKeyframeTrack(name, times, positionValues);
+    tracks.push(posTrack);
+  });
 };
 
 const parseNinjaModel = (buffer: ArrayBuffer): ParsedNinjaModel => {
