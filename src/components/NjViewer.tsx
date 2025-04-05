@@ -9,6 +9,7 @@ import {
   LoopRepeat,
   AnimationClip,
   VectorKeyframeTrack,
+  AnimationAction,
 } from "three";
 import { parsePvr, parsePvm } from "../lib/parsePvr";
 import type { PVMEntry } from "../lib/parsePvr";
@@ -22,48 +23,63 @@ interface NJViewerProps {
 }
 
 // Component to handle the rotation of the model and animation
-const Model: React.FC<{ mesh: THREE.SkinnedMesh | THREE.Mesh }> = ({
+const Model: React.FC<{ 
+  mesh: THREE.SkinnedMesh | THREE.Mesh;
+  animations?: THREE.AnimationClip[];
+  selectedAnimation?: string | null;
+}> = ({
   mesh,
+  animations = [],
+  selectedAnimation,
 }) => {
   const groupRef = useRef<THREE.Group>(null);
   const mixer = useRef<THREE.AnimationMixer | null>(null);
+  const actions = useRef<Map<string, AnimationAction>>(new Map());
   const clock = useRef<THREE.Clock>(new THREE.Clock());
+  const [activeAction, setActiveAction] = useState<AnimationAction | null>(null);
 
-  // Initialize animation mixer if it's a skinned mesh
+  // Initialize animation mixer when mesh or animations change
   useEffect(() => {
-    if (mesh instanceof THREE.SkinnedMesh && mesh.skeleton) {
-      // Create animation mixer for skeletal animation
-      mixer.current = new THREE.AnimationMixer(mesh);
-
-      // Create a simple animation for demonstration
-      const tracks: THREE.KeyframeTrack[] = [];
-      const times = [0, 1, 2]; // keyframe times
-      const positions = [
-        // Initial position
-        0, 0, 0,
-        // Slightly moved
-        0, 0.1, 0,
-        // Back to initial
-        0, 0, 0,
-      ];
-
-      // Create position track for the first bone if it exists
-      if (mesh.skeleton.bones.length > 0) {
-        const positionKF = new THREE.VectorKeyframeTrack(
-          `.skeleton.bones[0].position`,
-          times,
-          positions,
-        );
-        tracks.push(positionKF);
-
-        // Create a clip and play it
-        const clip = new THREE.AnimationClip("simpleAnimation", 2, tracks);
-        const action = mixer.current.clipAction(clip);
-        action.setLoop(THREE.LoopRepeat, Infinity);
-        action.play();
+    // Create animation mixer for the mesh
+    mixer.current = new THREE.AnimationMixer(mesh);
+    actions.current.clear();
+    
+    // Register all animations with the mixer
+    animations.forEach(clip => {
+      const action = mixer.current!.clipAction(clip);
+      action.setLoop(THREE.LoopRepeat, Infinity);
+      actions.current.set(clip.name, action);
+    });
+    
+    return () => {
+      // Clean up the mixer when component unmounts
+      if (mixer.current) {
+        mixer.current.stopAllAction();
+        mixer.current.uncacheRoot(mesh);
       }
+    };
+  }, [mesh, animations]);
+  
+  // Play selected animation when it changes
+  useEffect(() => {
+    if (!mixer.current) return;
+    
+    // Stop any currently active animation
+    if (activeAction) {
+      activeAction.fadeOut(0.5);
     }
-  }, [mesh]);
+    
+    // If we have a selected animation, play it
+    if (selectedAnimation && actions.current.has(selectedAnimation)) {
+      const newAction = actions.current.get(selectedAnimation)!;
+      newAction.reset();
+      newAction.fadeIn(0.5);
+      newAction.play();
+      setActiveAction(newAction);
+    } else {
+      setActiveAction(null);
+    }
+  }, [selectedAnimation]);
 
   useFrame(() => {
     // Update animation mixer
@@ -88,6 +104,8 @@ const NJViewer: React.FC<NJViewerProps> = ({
   const [model, setModel] = useState<THREE.SkinnedMesh | THREE.Mesh | null>(
     null,
   );
+  const [animations, setAnimations] = useState<THREE.AnimationClip[]>([]);
+  const [selectedAnimation, setSelectedAnimation] = useState<string | null>(null);
   const [textures, setTextures] = useState<Map<number, THREE.Texture>>(
     new Map(),
   );
@@ -349,10 +367,34 @@ const NJViewer: React.FC<NJViewerProps> = ({
               console.log("No material groups found in geometry");
             }
 
-            // Create the mesh with the geometry and materials
-            const mesh = new THREE.Mesh(parsedModel.geometry, materials);
-            console.log("Created mesh with", materials.length, "materials");
-            setModel(mesh);
+            // Check if we have bones and animations for a skinned mesh
+            if (parsedModel.bones && parsedModel.bones.length > 0) {
+              console.log("Model has bones:", parsedModel.bones.length);
+              
+              // Create a skinned mesh instead of a regular mesh
+              const skinnedMesh = new THREE.SkinnedMesh(parsedModel.geometry, materials);
+              
+              // Create the skeleton
+              const skeleton = new THREE.Skeleton(parsedModel.bones);
+              skinnedMesh.bind(skeleton);
+              
+              console.log("Created skinned mesh with skeleton");
+              
+              // Store animations if available
+              if (parsedModel.clips && parsedModel.clips.length > 0) {
+                console.log("Model has animations:", parsedModel.clips.length);
+                setAnimations(parsedModel.clips);
+                // Auto-select the first animation
+                setSelectedAnimation(parsedModel.clips[0].name);
+              }
+              
+              setModel(skinnedMesh);
+            } else {
+              // Create a regular mesh if no bones
+              const mesh = new THREE.Mesh(parsedModel.geometry, materials);
+              console.log("Created regular mesh with", materials.length, "materials");
+              setModel(mesh);
+            }
           }
         } catch (err) {
           console.error("Error loading or parsing NJ model:", err);
@@ -399,7 +441,11 @@ const NJViewer: React.FC<NJViewerProps> = ({
           />
   
           {model ? (
-            <Model mesh={model} />
+            <Model 
+              mesh={model} 
+              animations={animations}
+              selectedAnimation={selectedAnimation}
+            />
           ) : (
             // Placeholder box while loading
             <mesh>
@@ -413,6 +459,72 @@ const NJViewer: React.FC<NJViewerProps> = ({
           <axesHelper args={[5]} />
         </Canvas>
       </div>
+
+      {/* Animation Control Panel */}
+      {animations.length > 0 && (
+        <div className="animation-control-panel" style={{ 
+          marginTop: '10px', 
+          padding: '10px', 
+          borderRadius: '4px', 
+          backgroundColor: '#1a1a1a', 
+          border: '1px solid #2a2a2a' 
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', marginBottom: '5px' }}>
+            <h3 style={{ fontSize: '14px', margin: 0, marginRight: '10px' }}>Animations:</h3>
+            <select 
+              value={selectedAnimation || ''}
+              onChange={(e) => setSelectedAnimation(e.target.value)}
+              style={{ 
+                backgroundColor: '#2a2a2a', 
+                color: 'white', 
+                border: '1px solid #3a3a3a',
+                borderRadius: '4px',
+                padding: '4px 8px',
+                fontSize: '12px'
+              }}
+            >
+              {animations.map((clip) => (
+                <option key={clip.name} value={clip.name}>
+                  {clip.name} ({clip.duration.toFixed(2)}s)
+                </option>
+              ))}
+            </select>
+          </div>
+          <div style={{ display: 'flex', gap: '5px', fontSize: '12px' }}>
+            <button 
+              onClick={() => setSelectedAnimation(null)} 
+              style={{ 
+                backgroundColor: !selectedAnimation ? '#2a6ba3' : '#2a2a2a', 
+                color: 'white', 
+                border: 'none',
+                borderRadius: '4px',
+                padding: '4px 8px',
+                cursor: 'pointer',
+                fontSize: '12px'
+              }}
+            >
+              Stop
+            </button>
+            {animations.map((clip) => (
+              <button 
+                key={clip.name} 
+                onClick={() => setSelectedAnimation(clip.name)}
+                style={{ 
+                  backgroundColor: selectedAnimation === clip.name ? '#2a6ba3' : '#2a2a2a', 
+                  color: 'white', 
+                  border: 'none',
+                  borderRadius: '4px',
+                  padding: '4px 8px',
+                  cursor: 'pointer',
+                  fontSize: '12px'
+                }}
+              >
+                {clip.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       
       {/* Texture Debug Panel */}
       <div className="texture-debug-panel" style={{ marginTop: '10px', display: 'flex', flexWrap: 'wrap', gap: '10px' }}>

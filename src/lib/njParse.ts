@@ -863,305 +863,94 @@ interface ParsedNinjaModel {
   clips?: AnimationClip[];
 }
 
-interface MotionData {
-  ofs: number;
-  num?: number;
-}
-
-interface MotionEntry {
-  bone: number;
-  parent: number;
-  frames: any[];
-  pos?: MotionData;
-  rot?: MotionData;
-  scl?: MotionData;
-  quat?: MotionData;
-}
+type MotionItem = {
+  posOffset: number;
+  rotOffset: number;
+  rotSmallOffset: number;
+  sclOffset: number;
+  quatOffset: number;
+  posCount: number;
+  rotCount: number;
+  rotSmallCount: number;
+  sclCount: number;
+  quatCount: number;
+};
 
 const readAnimation = (reader: ByteReader, bones: Bone[], num: number) => {
   const motionOfs = reader.readUInt32();
   const nbFrame = reader.readUInt32();
   const motionType = reader.readUInt16();
   const motionFlag = reader.readUInt16();
-  const nbElements = motionFlag & 0x0f;
-
-  const motionList = new Array(bones.length);
-  const motionTypes = {
-    pos: motionType & 1,
-    rot: motionType & 2,
-    scl: motionType & 4,
-    quat: motionType & 0x2000,
-  };
-
-  reader.seekEnd(0);
-  const length = reader.tell();
-
-  reader.seek(motionOfs);
-  let firstOfs = length;
-
-  for (let i = 0; i < bones.length; i++) {
-    let motionEntry: MotionEntry = {
-      bone: i,
-      parent: i - 1,
-      frames: [],
-    };
-
-    if (reader.tell() === firstOfs) {
-      motionList[i] = motionEntry;
-      continue;
-    }
-
-    // Read the offset to each list
-    for (const key of Object.keys(motionTypes) as Array<
-      keyof typeof motionTypes
-    >) {
-      if (!motionTypes[key]) {
-        continue;
-      }
-
-      const ofs = reader.readUInt32(); // Assuming this is the correct method
-      if (ofs && ofs < firstOfs) {
-        firstOfs = ofs;
-      }
-
-      // Type-safe property access
-      motionEntry[key] = { ofs };
-    }
-
-    // Read the number of entries for each list
-    for (const key of Object.keys(motionTypes) as Array<
-      keyof typeof motionTypes
-    >) {
-      if (!motionTypes[key]) {
-        continue;
-      }
-
-      let num = reader.readUInt32(); // Assuming this is the correct method
-
-      if (num === 0) {
-        delete motionEntry[key];
-      } else {
-        // Type-safe property access
-        if (motionEntry[key]) {
-          motionEntry[key].num = num;
-        }
-      }
-    }
-
-    motionList[i] = motionEntry;
-  }
-
-  motionList.forEach((motion) => {
-    // Read Position
-
-    if (motion.pos) {
-      reader.seek(motion.pos.ofs);
-
-      for (let i = 0; i < motion.pos.num; i++) {
-        const frameNo = reader.readUInt32();
-        const pos = {
-          x: reader.readFloat(),
-          y: reader.readFloat(),
-          z: reader.readFloat(),
-        };
-
-        if (!motion.frames[frameNo]) {
-          motion.frames[frameNo] = {};
-        }
-
-        motion.frames[frameNo].pos = pos;
-      }
-
-      delete motion.pos;
-    }
-
-    // Read Rotation
-    if (motion.rot) {
-      reader.seek(motion.rot.ofs);
-
-      for (let i = 0; i < motion.rot.num; i++) {
-        const frameNo = reader.readUInt32();
-        const rot = {
-          x: reader.readInt32() * ((2 * Math.PI) / 0xffff),
-          y: reader.readInt32() * ((2 * Math.PI) / 0xffff),
-          z: reader.readInt32() * ((2 * Math.PI) / 0xffff),
-        };
-
-        if (!motion.frames[frameNo]) {
-          motion.frames[frameNo] = {};
-        }
-
-        motion.frames[frameNo].rot = rot;
-      }
-
-      delete motion.rot;
-    }
-
-    if (motion.quat) {
-      reader.seek(motion.quat.ofs);
-
-      for (let i = 0; i < motion.quat.num; i++) {
-        const frameNo = reader.readUInt32();
-        const w = reader.readFloat();
-        const x = reader.readFloat();
-        const y = reader.readFloat();
-        const z = reader.readFloat();
-
-        if (!motion.frames[frameNo]) {
-          motion.frames[frameNo] = {};
-        }
-
-        motion.frames[frameNo].quat = [x, y, z, w];
-      }
-
-      delete motion.quat;
-    }
-
-    // Read Scale
-
-    if (motion.scl) {
-      reader.seek(motion.scl.ofs);
-
-      for (let i = 0; i < motion.scl.num; i++) {
-        const frameNo = reader.readUInt32();
-        const scl = {
-          x: reader.readFloat(),
-          y: reader.readFloat(),
-          z: reader.readFloat(),
-        };
-
-        if (!motion.frames[frameNo]) {
-          motion.frames[frameNo] = {};
-        }
-
-        motion.frames[frameNo].scl = scl;
-      }
-
-      delete motion.scl;
-    }
-  });
 
   const duration = (nbFrame - 1) / 30;
+  const motionList: MotionItem[] = [];
+  const POS_BIT = 0x01;
+  const ROT_BIT = 0x02;
+  const ROT_SMALL_BIT = 0x20;
+  const SCL_BIT = 0x04;
+  const QUAT_BIT = 0x2000;
 
-  // With a tracks array that will store our KeyframeTracks
-  const tracks = [];
-
+  reader.seek(motionOfs);
   for (let i = 0; i < bones.length; i++) {
-    const bone = bones[i];
-    const motion = motionList[i];
-    const boneName = bone.name || `bone_${i}`;
+    const item = {
+      posOffset: 0,
+      rotOffset: 0,
+      rotSmallOffset: 0,
+      sclOffset: 0,
+      quatOffset: 0,
+      posCount: 0,
+      rotCount: 0,
+      rotSmallCount: 0,
+      sclCount: 0,
+      quatCount: 0,
+    };
 
-    // Arrays to store keyframe data for this bone
-    const times = [];
-    const positionValues = [];
-    const rotationValues = [];
-    const scaleValues = [];
-
-    // Process frames similar to your original code
-    for (let k = 0; k < nbFrame; k++) {
-      let frame = motion.frames[k];
-
-      // Skip frames with no data
-      if (!frame && k !== 0 && k !== nbFrame - 1) {
-        continue;
-      }
-
-      // Initialize frame if needed for first/last frames
-      if ((k === 0 || k === nbFrame - 1) && !frame) {
-        frame = {};
-      }
-
-      // Process position data
-      if (frame) {
-        // Record time for this keyframe
-        times.push(k / 30);
-
-        // Handle position
-        if (frame.pos) {
-          let pos = frame.pos;
-          if (typeof pos.x !== "undefined") {
-            pos = [pos.x, pos.y, pos.z];
-          }
-          positionValues.push(...pos);
-        } else if (k === 0 || k === nbFrame - 1) {
-          positionValues.push(...bone.position.toArray());
-        }
-
-        // Handle rotation
-        if (frame.rot) {
-          const obj = new Bone();
-
-          const xRotMatrix = new Matrix4();
-          xRotMatrix.makeRotationX(frame.rot.x);
-          obj.applyMatrix4(xRotMatrix);
-
-          const yRotMatrix = new Matrix4();
-          yRotMatrix.makeRotationY(frame.rot.y);
-          obj.applyMatrix4(yRotMatrix);
-
-          const zRotMatrix = new Matrix4();
-          zRotMatrix.makeRotationZ(frame.rot.z);
-          obj.applyMatrix4(zRotMatrix);
-
-          const quat = new Quaternion();
-          quat.setFromRotationMatrix(obj.matrix);
-          rotationValues.push(...quat.toArray());
-        } else if (frame.quat) {
-          rotationValues.push(...frame.quat);
-        } else if (k === 0 || k === nbFrame - 1) {
-          rotationValues.push(...bone.quaternion.toArray());
-        }
-
-        // Handle scale
-        if (frame.scl) {
-          let scl = frame.scl;
-          if (typeof scl.x !== "undefined") {
-            scl = [scl.x, scl.y, scl.z];
-          }
-          scaleValues.push(...scl);
-        } else if (k === 0 || k === nbFrame - 1) {
-          scaleValues.push(...bone.scale.toArray());
-        }
-      }
+    // First we read offsets
+    if (motionType & POS_BIT) {
+      item.posOffset = reader.readUInt32();
     }
 
-    // Create and add tracks for this bone if we have keyframe data
-    if (positionValues.length > 0) {
-      const posTrack = new VectorKeyframeTrack(
-        `${boneName}.position`,
-        times,
-        positionValues,
-      );
-      tracks.push(posTrack);
+    if (motionType & ROT_BIT) {
+      item.rotOffset = reader.readUInt32();
     }
 
-    if (rotationValues.length > 0) {
-      const rotTrack = new QuaternionKeyframeTrack(
-        `${boneName}.quaternion`,
-        times,
-        rotationValues,
-      );
-      tracks.push(rotTrack);
+    if (motionType & ROT_SMALL_BIT) {
+      item.rotSmallOffset = reader.readUInt32();
     }
 
-    if (scaleValues.length > 0) {
-      const sclTrack = new VectorKeyframeTrack(
-        `${boneName}.scale`,
-        times,
-        scaleValues,
-      );
-      tracks.push(sclTrack);
+    if (motionType & SCL_BIT) {
+      item.sclOffset = reader.readUInt32();
     }
+
+    if (motionType & QUAT_BIT) {
+      item.quatOffset = reader.readUInt32();
+    }
+
+    // First we read counts
+    if (motionType & POS_BIT) {
+      item.posCount = reader.readUInt32();
+    }
+
+    if (motionType & ROT_BIT) {
+      item.rotCount = reader.readUInt32();
+    }
+
+    if (motionType & ROT_SMALL_BIT) {
+      item.rotSmallCount = reader.readUInt32();
+    }
+
+    if (motionType & SCL_BIT) {
+      item.sclCount = reader.readUInt32();
+    }
+
+    if (motionType & QUAT_BIT) {
+      item.quatCount = reader.readUInt32();
+    }
+
+    motionList.push(item);
   }
 
-  // Create the final animation clip
-  const clip = new AnimationClip(
-    `anim_${num.toString().padStart(3, "0")}`,
-    duration,
-    tracks,
-  );
-  clip.optimize();
-  return clip;
+  console.log(motionList);
 };
 
 const parseNinjaModel = (buffer: ArrayBuffer): ParsedNinjaModel => {
@@ -1188,13 +977,17 @@ const parseNinjaModel = (buffer: ArrayBuffer): ParsedNinjaModel => {
       result.materialIndices = model.getMaterialIndices();
       result.bones = model.getBones();
     } else if (magic === "NMDM") {
-      console.log("FOUND ANIMATION!!!!!");
       if (!result.bones) {
         continue;
       }
       result.clips = result.clips || [];
-      const anim = readAnimation(chunk, result.bones, result.clips.length);
-      result.clips.push(anim);
+      console.log("FOUND ANIMATION!!!!!", result.clips.length);
+      try {
+        const anim = readAnimation(chunk, result.bones, result.clips.length);
+        result.clips.push(anim);
+      } catch (err) {
+        throw err;
+      }
     } else if (magic === "POF0") {
       continue;
     } else {
