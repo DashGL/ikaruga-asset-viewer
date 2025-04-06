@@ -202,87 +202,80 @@ const NJViewer: React.FC<NJViewerProps> = ({
     modelPath: string,
     textureMap: Map<number | string, THREE.Texture>,
   ) => {
-    try {
-      console.log(`Loading model: ${modelPath}`);
-      const response = await fetch(`/iso/${modelPath}`);
-      if (!response.ok) {
-        throw new Error(`Failed to load model: ${response.statusText}`);
-      }
+    console.log(`Loading model: ${modelPath}`);
+    const response = await fetch(`/iso/${modelPath}`);
+    if (!response.ok) {
+      throw new Error(`Failed to load model: ${response.statusText}`);
+    }
 
-      const modelBuffer = await response.arrayBuffer();
-      const parsedModel = parseNinjaModel(modelBuffer);
+    const modelBuffer = await response.arrayBuffer();
+    const parsedModel = parseNinjaModel(modelBuffer);
 
-      console.log("Parsed model:", parsedModel);
-      console.log("TextureNames:", parsedModel.textureNames);
-      console.log("Materials count:", parsedModel.materials?.length);
+    console.log("Parsed model:", parsedModel);
+    console.log("TextureNames:", parsedModel.textureNames);
+    console.log("Materials count:", parsedModel.materials?.length);
 
-      if (!parsedModel.geometry || !parsedModel.materials) {
-        throw new Error("Model missing geometry or materials");
-      }
+    if (!parsedModel.geometry || !parsedModel.materials) {
+      throw new Error("Model missing geometry or materials");
+    }
 
-      // Create materials from the parsed model
-      const materials = parsedModel.materials.map((materialOpts, index) => {
-        // Basic material properties
-        const material = new THREE.MeshPhongMaterial({
-          side: materialOpts.doubleSide ? THREE.DoubleSide : THREE.FrontSide,
-          transparent: materialOpts.blending || false,
-          name: `Material_${index}`,
-        });
-
-        // Set colors if available
-        if (materialOpts.diffuseColor) {
-          material.color.setRGB(
-            materialOpts.diffuseColor.r,
-            materialOpts.diffuseColor.g,
-            materialOpts.diffuseColor.b,
-          );
-          material.opacity = materialOpts.diffuseColor.a;
-        }
-
-        // Apply textures using different strategies
-        applyTextureToMaterial(
-          material,
-          materialOpts,
-          parsedModel,
-          textureMap,
-          index,
-        );
-
-        return material;
+    // Create materials from the parsed model
+    const materials = parsedModel.materials.map((materialOpts, index) => {
+      // Basic material properties
+      const material = new THREE.MeshPhongMaterial({
+        side: materialOpts.doubleSide ? THREE.DoubleSide : THREE.FrontSide,
+        transparent: materialOpts.blending || false,
+        name: `Material_${index}`,
       });
 
-      // If no materials defined, create a default material
-      if (materials.length === 0) {
-        materials.push(new THREE.MeshNormalMaterial());
-      }
-
-      // Log groups info for debugging
-      if (
-        parsedModel.geometry.groups &&
-        parsedModel.geometry.groups.length > 0
-      ) {
-        console.log(
-          "Material groups in geometry:",
-          parsedModel.geometry.groups,
+      // Set colors if available
+      if (materialOpts.diffuseColor) {
+        material.color.setRGB(
+          materialOpts.diffuseColor.r,
+          materialOpts.diffuseColor.g,
+          materialOpts.diffuseColor.b,
         );
-        parsedModel.geometry.groups.forEach((group, i) => {
-          console.log(
-            `Group ${i}: materialIndex=${group.materialIndex}, start=${group.start}, count=${group.count}`,
-          );
-        });
-      } else {
-        console.log("No material groups found in geometry");
+        material.opacity = materialOpts.diffuseColor.a;
       }
 
-      // Create the mesh with the geometry and materials
-      const mesh = new THREE.Mesh(parsedModel.geometry, materials);
-      console.log("Created mesh with", materials.length, "materials");
+      // Apply textures using different strategies
+      applyTextureToMaterial(
+        material,
+        materialOpts,
+        parsedModel,
+        textureMap,
+        index,
+      );
 
-      return mesh;
-    } catch (err) {
-      console.error("Error loading or parsing NJ model:", err);
-      throw err;
+      return material;
+    });
+
+    // If no materials defined, create a default material
+    if (materials.length === 0) {
+      materials.push(new THREE.MeshNormalMaterial());
     }
+
+    // Log groups info for debugging
+    if (parsedModel.geometry.groups && parsedModel.geometry.groups.length > 0) {
+      console.log("Material groups in geometry:", parsedModel.geometry.groups);
+      parsedModel.geometry.groups.forEach((group, i) => {
+        console.log(
+          `Group ${i}: materialIndex=${group.materialIndex}, start=${group.start}, count=${group.count}`,
+        );
+      });
+    } else {
+      console.log("No material groups found in geometry");
+    }
+
+    // Create the mesh with the geometry and materials
+    const mesh = new THREE.SkinnedMesh(parsedModel.geometry, materials);
+    console.log("Created mesh with", materials.length, "materials");
+    const skeleton = new THREE.Skeleton(parsedModel.bones);
+    const rootBone = skeleton.bones[0];
+    mesh.add(rootBone);
+    mesh.bind(skeleton);
+
+    return mesh;
   };
 
   // Apply texture to material using different strategies
