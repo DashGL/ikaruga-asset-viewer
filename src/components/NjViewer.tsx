@@ -91,9 +91,9 @@ const NJViewer: React.FC<NJViewerProps> = ({
   const [textures, setTextures] = useState<Map<number, THREE.Texture>>(
     new Map(),
   );
-  const [textureCanvases, setTextureCanvases] = useState<Map<number, HTMLCanvasElement>>(
-    new Map(),
-  );
+  const [textureCanvases, setTextureCanvases] = useState<
+    Map<number, HTMLCanvasElement>
+  >(new Map());
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -101,40 +101,49 @@ const NJViewer: React.FC<NJViewerProps> = ({
   const processTextureEntry = async (entry: PVMEntry, texturePath: string) => {
     try {
       const { imageData } = await parsePvr(entry.data);
-      
+
       const canvas = document.createElement("canvas");
       canvas.width = imageData.width;
       canvas.height = imageData.height;
       canvas.style.border = "1px solid white";
       canvas.title = entry.name;
-      
+
       const context = canvas.getContext("2d");
       if (!context) return null;
-      
+
       context.putImageData(imageData, 0, 0);
-      
+
       const texture = new THREE.CanvasTexture(canvas);
       texture.flipY = false;
       texture.name = entry.name;
       texture.needsUpdate = true;
-      
+
       texture.userData = {
         applied: false,
         path: `${texturePath}/${entry.name}`,
-        fromPVM: true
+        fromPVM: true,
       };
-      
-      console.log(`Successfully loaded texture: ${texture.name} (${imageData.width}x${imageData.height}) from PVM`);
-      
+
+      console.log(
+        `Successfully loaded texture: ${texture.name} (${imageData.width}x${imageData.height}) from PVM`,
+      );
+
       return { texture, canvas };
     } catch (err) {
-      console.warn(`Error processing PVR entry ${entry.name} in ${texturePath}:`, err);
+      console.warn(
+        `Error processing PVR entry ${entry.name} in ${texturePath}:`,
+        err,
+      );
       return null;
     }
   };
-  
+
   // Process a single PVR file
-  const processPvrFile = async (buffer: ArrayBuffer, texturePath: string, index: number) => {
+  const processPvrFile = async (
+    buffer: ArrayBuffer,
+    texturePath: string,
+    index: number,
+  ) => {
     try {
       const { imageData } = await parsePvr(buffer);
 
@@ -146,48 +155,53 @@ const NJViewer: React.FC<NJViewerProps> = ({
 
       const context = canvas.getContext("2d");
       if (!context) return null;
-      
+
       context.putImageData(imageData, 0, 0);
 
       const texture = new THREE.CanvasTexture(canvas);
       texture.flipY = false;
       texture.name = texturePath.split("/").pop() || "";
       texture.needsUpdate = true;
-      
-      texture.userData = { 
+
+      texture.userData = {
         applied: false,
         index,
-        path: texturePath 
+        path: texturePath,
       };
 
-      console.log(`Successfully loaded texture: ${texture.name} (${imageData.width}x${imageData.height})`);
-      
+      console.log(
+        `Successfully loaded texture: ${texture.name} (${imageData.width}x${imageData.height})`,
+      );
+
       return { texture, canvas, key: index };
     } catch (err) {
       console.warn(`Error processing PVR file ${texturePath}:`, err);
       return null;
     }
   };
-  
+
   // Process a PVM container file
   const processPvmFile = async (buffer: ArrayBuffer, texturePath: string) => {
     try {
       const entries = await parsePvm(buffer);
       console.log(`Successfully extracted ${entries.length} textures from PVM`);
-      
+
       const results = await Promise.all(
-        entries.map(entry => processTextureEntry(entry, texturePath))
+        entries.map((entry) => processTextureEntry(entry, texturePath)),
       );
-      
-      return results.filter(result => result !== null);
+
+      return results.filter((result) => result !== null);
     } catch (err) {
       console.error(`Failed to parse PVM file ${texturePath}:`, err);
       return null;
     }
   };
-  
+
   // Load model with available textures
-  const loadModel = async (modelPath: string, textureMap: Map<number | string, THREE.Texture>) => {
+  const loadModel = async (
+    modelPath: string,
+    textureMap: Map<number | string, THREE.Texture>,
+  ) => {
     try {
       console.log(`Loading model: ${modelPath}`);
       const response = await fetch(`/iso/${modelPath}`);
@@ -201,11 +215,11 @@ const NJViewer: React.FC<NJViewerProps> = ({
       console.log("Parsed model:", parsedModel);
       console.log("TextureNames:", parsedModel.textureNames);
       console.log("Materials count:", parsedModel.materials?.length);
-      
+
       if (!parsedModel.geometry || !parsedModel.materials) {
         throw new Error("Model missing geometry or materials");
       }
-      
+
       // Create materials from the parsed model
       const materials = parsedModel.materials.map((materialOpts, index) => {
         // Basic material properties
@@ -214,33 +228,47 @@ const NJViewer: React.FC<NJViewerProps> = ({
           transparent: materialOpts.blending || false,
           name: `Material_${index}`,
         });
-        
+
         // Set colors if available
         if (materialOpts.diffuseColor) {
           material.color.setRGB(
             materialOpts.diffuseColor.r,
             materialOpts.diffuseColor.g,
-            materialOpts.diffuseColor.b
+            materialOpts.diffuseColor.b,
           );
           material.opacity = materialOpts.diffuseColor.a;
         }
-        
+
         // Apply textures using different strategies
-        applyTextureToMaterial(material, materialOpts, parsedModel, textureMap, index);
-        
+        applyTextureToMaterial(
+          material,
+          materialOpts,
+          parsedModel,
+          textureMap,
+          index,
+        );
+
         return material;
       });
-      
+
       // If no materials defined, create a default material
       if (materials.length === 0) {
         materials.push(new THREE.MeshNormalMaterial());
       }
-      
+
       // Log groups info for debugging
-      if (parsedModel.geometry.groups && parsedModel.geometry.groups.length > 0) {
-        console.log("Material groups in geometry:", parsedModel.geometry.groups);
+      if (
+        parsedModel.geometry.groups &&
+        parsedModel.geometry.groups.length > 0
+      ) {
+        console.log(
+          "Material groups in geometry:",
+          parsedModel.geometry.groups,
+        );
         parsedModel.geometry.groups.forEach((group, i) => {
-          console.log(`Group ${i}: materialIndex=${group.materialIndex}, start=${group.start}, count=${group.count}`);
+          console.log(
+            `Group ${i}: materialIndex=${group.materialIndex}, start=${group.start}, count=${group.count}`,
+          );
         });
       } else {
         console.log("No material groups found in geometry");
@@ -249,161 +277,162 @@ const NJViewer: React.FC<NJViewerProps> = ({
       // Create the mesh with the geometry and materials
       const mesh = new THREE.Mesh(parsedModel.geometry, materials);
       console.log("Created mesh with", materials.length, "materials");
-      
+
       return mesh;
     } catch (err) {
       console.error("Error loading or parsing NJ model:", err);
       throw err;
     }
   };
-  
+
   // Apply texture to material using different strategies
   const applyTextureToMaterial = (
     material: THREE.MeshPhongMaterial,
     materialOpts: any,
-    parsedModel: NinjaModel, 
+    parsedModel: NinjaModel,
     textureMap: Map<number | string, THREE.Texture>,
-    materialIndex: number
+    materialIndex: number,
   ) => {
     let textureApplied = false;
-    
+
     // Strategy 1: Direct texture name match from PVM
-    if (parsedModel.textureNames && parsedModel.textureNames.length > materialOpts.texId) {
+    if (
+      parsedModel.textureNames &&
+      parsedModel.textureNames.length > materialOpts.texId
+    ) {
       const textureName = parsedModel.textureNames[materialOpts.texId];
       if (textureName && textureMap.has(textureName)) {
         const texture = textureMap.get(textureName);
         material.map = texture;
         material.needsUpdate = true;
         texture.userData.applied = true;
-        console.log(`Applied texture "${textureName}" directly from PVM to material ${materialIndex}`);
+        console.log(
+          `Applied texture "${textureName}" directly from PVM to material ${materialIndex}`,
+        );
         textureApplied = true;
       }
     }
-    
+
     // Strategy 2: By index for single PVR files
-    if (!textureApplied && materialOpts.texId >= 0 && textureMap.has(materialOpts.texId)) {
+    if (
+      !textureApplied &&
+      materialOpts.texId >= 0 &&
+      textureMap.has(materialOpts.texId)
+    ) {
       const texture = textureMap.get(materialOpts.texId);
       material.map = texture;
       material.needsUpdate = true;
       texture.userData.applied = true;
-      console.log(`Applied texture by index ${materialOpts.texId} to material ${materialIndex}`);
+      console.log(
+        `Applied texture by index ${materialOpts.texId} to material ${materialIndex}`,
+      );
       textureApplied = true;
     }
-    
+
     // Strategy 3: Texture name fuzzy matching
-    if (!textureApplied && parsedModel.textureNames && parsedModel.textureNames.length > materialOpts.texId) {
+    if (
+      !textureApplied &&
+      parsedModel.textureNames &&
+      parsedModel.textureNames.length > materialOpts.texId
+    ) {
       const textureName = parsedModel.textureNames[materialOpts.texId];
-      
+
       for (const [key, texture] of textureMap.entries()) {
         if (
           key === textureName ||
-          (typeof key === 'string' && key.toLowerCase() === textureName.toLowerCase()) ||
-          (typeof key === 'string' && key.split('/').pop()?.split('.')[0]?.toLowerCase() === textureName.toLowerCase())
+          (typeof key === "string" &&
+            key.toLowerCase() === textureName.toLowerCase()) ||
+          (typeof key === "string" &&
+            key.split("/").pop()?.split(".")[0]?.toLowerCase() ===
+              textureName.toLowerCase())
         ) {
           material.map = texture;
           material.needsUpdate = true;
           texture.userData.applied = true;
-          console.log(`Applied texture "${key}" to material ${materialIndex} by name matching with "${textureName}"`);
+          console.log(
+            `Applied texture "${key}" to material ${materialIndex} by name matching with "${textureName}"`,
+          );
           textureApplied = true;
           break;
         }
       }
-      
+
       if (!textureApplied) {
         console.log(`No matching texture found for name: ${textureName}`);
       }
     }
-    
+
     if (!textureApplied) {
-      console.log(`No texture applied to material ${materialIndex} with texId: ${materialOpts.texId}`);
+      console.log(
+        `No texture applied to material ${materialIndex} with texId: ${materialOpts.texId}`,
+      );
     }
-    
+
     // Always ensure textures are properly updated
     if (material.map) {
       material.map.needsUpdate = true;
     }
   };
-  
+
   // Combined loading function for sequential loading
   useEffect(() => {
     const loadAll = async () => {
       console.log("Starting sequential loading process");
       setLoading(true);
       setError(null);
-      
-      try {
-        // Step 1: Load textures first
-        console.log("Step 1: Loading textures");
-        const textureMap = new Map<number | string, THREE.Texture>();
-        const canvasesMap = new Map<number | string, HTMLCanvasElement>();
 
-        if (texturePaths.length > 0) {
-          for (let i = 0; i < texturePaths.length; i++) {
-            const texturePath = texturePaths[i];
-            try {
-              console.log(`Loading texture from: /iso/${texturePath}`);
-              const response = await fetch(`/iso/${texturePath}`);
-              if (!response.ok) {
-                console.warn(`Failed to load texture: ${texturePath}`);
-                continue;
-              }
+      // Step 1: Load textures first
+      console.log("Step 1: Loading textures");
+      const textureMap = new Map<number | string, THREE.Texture>();
+      const canvasesMap = new Map<number | string, HTMLCanvasElement>();
 
-              const buffer = await response.arrayBuffer();
-              const isPVM = texturePath.toLowerCase().endsWith('.pvm');
-              
-              if (isPVM) {
-                console.log("Processing PVM file...");
-                const results = await processPvmFile(buffer, texturePath);
-                
-                if (results) {
-                  results.forEach(result => {
-                    if (result) {
-                      textureMap.set(result.texture.name, result.texture);
-                      canvasesMap.set(result.texture.name, result.canvas);
-                    }
-                  });
-                } else {
-                  // Fall back to treating as PVR if PVM parsing fails
-                  console.warn("Falling back to treating as regular PVR file...");
-                  const result = await processPvrFile(buffer, texturePath, i);
-                  if (result) {
-                    textureMap.set(result.key, result.texture);
-                    canvasesMap.set(result.key, result.canvas);
-                  }
-                }
-              } else {
-                // Process as regular PVR file
-                const result = await processPvrFile(buffer, texturePath, i);
-                if (result) {
-                  textureMap.set(result.key, result.texture);
-                  canvasesMap.set(result.key, result.canvas);
-                }
-              }
-            } catch (err) {
-              console.warn(`Error loading texture ${texturePath}:`, err);
+      for (let i = 0; i < texturePaths.length; i++) {
+        const texturePath = texturePaths[i];
+
+        console.log(`Loading texture from: /iso/${texturePath}`);
+        const response = await fetch(`/iso/${texturePath}`);
+        if (!response.ok) {
+          console.warn(`Failed to load texture: ${texturePath}`);
+          continue;
+        }
+
+        const buffer = await response.arrayBuffer();
+        const isPVM = texturePath.toLowerCase().endsWith(".pvm");
+
+        if (isPVM) {
+          console.log("Processing PVM file...");
+          const results = await processPvmFile(buffer, texturePath);
+          if (!results) {
+            throw new Error("Unable to process pvm!!???");
+          }
+          results.forEach((result) => {
+            if (result) {
+              textureMap.set(result.texture.name, result.texture);
+              canvasesMap.set(result.texture.name, result.canvas);
             }
+          });
+        } else {
+          // Process as regular PVR file
+          const result = await processPvrFile(buffer, texturePath, i);
+          if (result) {
+            textureMap.set(result.key, result.texture);
+            canvasesMap.set(result.key, result.canvas);
           }
         }
-
-        console.log(`Loaded ${textureMap.size} textures`);
-        
-        // Update state with loaded textures
-        setTextures(textureMap);
-        setTextureCanvases(canvasesMap);
-        
-        // Step 2: Now load the model with the loaded textures
-        try {
-          const mesh = await loadModel(modelPath, textureMap);
-          setModel(mesh);
-        } catch (err) {
-          setError(err instanceof Error ? err.message : "Unknown error loading model");
-        }
-      } catch (err) {
-        console.error("Error in sequential loading process:", err);
-        setError("Failed to load resources");
-      } finally {
-        setLoading(false);
       }
+
+      console.log(`Loaded ${textureMap.size} textures`);
+
+      // Update state with loaded textures
+      setTextures(textureMap);
+      setTextureCanvases(canvasesMap);
+
+      // Step 2: Now load the model with the loaded textures
+      const mesh = await loadModel(modelPath, textureMap);
+      setModel(mesh);
+
+      // Step 3: Remove Loading
+      setLoading(false);
     };
 
     loadAll(); // Start the sequential loading process
@@ -420,13 +449,13 @@ const NJViewer: React.FC<NJViewerProps> = ({
             <div className="text-white">Loading model...</div>
           </div>
         )}
-  
+
         {error && (
           <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-30 z-10">
             <div className="text-red-500">{error}</div>
           </div>
         )}
-  
+
         <Canvas camera={{ position: [0, 2, 5], fov: 50 }}>
           <ambientLight intensity={0.5} />
           <pointLight position={[10, 10, 10]} intensity={1} />
@@ -435,7 +464,7 @@ const NJViewer: React.FC<NJViewerProps> = ({
             intensity={0.5}
             color="#8080ff"
           />
-  
+
           {model ? (
             <Model mesh={model} />
           ) : (
@@ -445,59 +474,80 @@ const NJViewer: React.FC<NJViewerProps> = ({
               <meshStandardMaterial color="#6be092" />
             </mesh>
           )}
-  
+
           <OrbitControls />
           <gridHelper args={[10, 10]} />
           <axesHelper args={[5]} />
         </Canvas>
       </div>
-      
+
       {/* Texture Debug Panel */}
-      <div className="texture-debug-panel" style={{ marginTop: '10px', display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
-        <div style={{ width: '100%' }}>
-          <h3 style={{ fontSize: '14px', marginBottom: '5px' }}>Texture Debug Panel:</h3>
+      <div
+        className="texture-debug-panel"
+        style={{
+          marginTop: "10px",
+          display: "flex",
+          flexWrap: "wrap",
+          gap: "10px",
+        }}
+      >
+        <div style={{ width: "100%" }}>
+          <h3 style={{ fontSize: "14px", marginBottom: "5px" }}>
+            Texture Debug Panel:
+          </h3>
         </div>
         {Array.from(textureCanvases.entries()).map(([key, canvas]) => {
           // For numeric keys (old style) or string keys (from PVM)
-          const texture = typeof key === 'number' ? textures.get(key) : textures.get(key);
+          const texture =
+            typeof key === "number" ? textures.get(key) : textures.get(key);
           const isApplied = texture?.userData?.applied || false;
           const textureName = texture?.name || `Texture ${key}`;
-          const texturePath = texture?.userData?.path || '';
+          const texturePath = texture?.userData?.path || "";
           const fromPVM = texture?.userData?.fromPVM || false;
-          
+
           return (
-            <div key={typeof key === 'string' ? key : String(key)} style={{ 
-              display: 'flex', 
-              flexDirection: 'column',
-              alignItems: 'center', 
-              border: isApplied ? '2px solid green' : '2px solid red',
-              padding: '5px',
-              borderRadius: '4px',
-              background: fromPVM ? '#223322' : '#222'
-            }}>
-              <div style={{ 
-                fontSize: '12px',
-                color: isApplied ? 'lightgreen' : 'salmon',
-                marginBottom: '3px',
-                whiteSpace: 'nowrap'
-              }}>
-                {isApplied ? '✓ ' : '✗ '}
+            <div
+              key={typeof key === "string" ? key : String(key)}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                border: isApplied ? "2px solid green" : "2px solid red",
+                padding: "5px",
+                borderRadius: "4px",
+                background: fromPVM ? "#223322" : "#222",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "12px",
+                  color: isApplied ? "lightgreen" : "salmon",
+                  marginBottom: "3px",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {isApplied ? "✓ " : "✗ "}
                 {textureName}
               </div>
-              <div style={{ 
-                display: 'flex',
-                justifyContent: 'center',
-                alignItems: 'center',
-                width: '64px',
-                height: '64px',
-                overflow: 'hidden'
-              }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "center",
+                  alignItems: "center",
+                  width: "64px",
+                  height: "64px",
+                  overflow: "hidden",
+                }}
+              >
                 <canvas
                   ref={(ref) => {
                     if (ref) {
-                      const ctx = ref.getContext('2d');
+                      const ctx = ref.getContext("2d");
                       if (ctx) {
-                        const scale = Math.min(64 / canvas.width, 64 / canvas.height);
+                        const scale = Math.min(
+                          64 / canvas.width,
+                          64 / canvas.height,
+                        );
                         ref.width = canvas.width * scale;
                         ref.height = canvas.height * scale;
                         ctx.scale(scale, scale);
@@ -507,17 +557,21 @@ const NJViewer: React.FC<NJViewerProps> = ({
                   }}
                   width={64}
                   height={64}
-                  title={`Key: ${key}, Name: ${textureName}, Applied: ${isApplied}${fromPVM ? ', From PVM' : ''}, Path: ${texturePath}`}
+                  title={`Key: ${key}, Name: ${textureName}, Applied: ${isApplied}${fromPVM ? ", From PVM" : ""}, Path: ${texturePath}`}
                 />
               </div>
-              <div style={{ fontSize: '10px', color: '#aaa', marginTop: '3px' }}>
+              <div
+                style={{ fontSize: "10px", color: "#aaa", marginTop: "3px" }}
+              >
                 {canvas.width}x{canvas.height}
               </div>
             </div>
           );
         })}
         {textureCanvases.size === 0 && (
-          <div style={{ color: '#aaa', fontSize: '12px' }}>No textures loaded</div>
+          <div style={{ color: "#aaa", fontSize: "12px" }}>
+            No textures loaded
+          </div>
         )}
       </div>
     </div>
