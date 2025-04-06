@@ -9,6 +9,7 @@ import {
   LoopRepeat,
   AnimationClip,
   VectorKeyframeTrack,
+  SkeletonHelper,
 } from "three";
 import { parsePvr, parsePvm } from "../lib/parsePvr";
 import type { PVMEntry } from "../lib/parsePvr";
@@ -22,18 +23,24 @@ interface NJViewerProps {
 }
 
 // Component to handle the rotation of the model and animation
-const Model: React.FC<{ mesh: THREE.SkinnedMesh | THREE.Mesh }> = ({
+const Model: React.FC<{ mesh: THREE.SkinnedMesh | THREE.Mesh, showSkeleton: boolean }> = ({
   mesh,
+  showSkeleton
 }) => {
   const groupRef = useRef<THREE.Group>(null);
   const mixer = useRef<THREE.AnimationMixer | null>(null);
   const clock = useRef<THREE.Clock>(new THREE.Clock());
+  const skeletonHelperRef = useRef<THREE.SkeletonHelper | null>(null);
 
   // Initialize animation mixer if it's a skinned mesh
   useEffect(() => {
     if (mesh instanceof THREE.SkinnedMesh && mesh.skeleton) {
       // Create animation mixer for skeletal animation
       mixer.current = new THREE.AnimationMixer(mesh);
+
+      // Create skeleton helper
+      skeletonHelperRef.current = new THREE.SkeletonHelper(mesh);
+      skeletonHelperRef.current.visible = showSkeleton;
 
       // Create a simple animation for demonstration
       const tracks: THREE.KeyframeTrack[] = [];
@@ -63,7 +70,14 @@ const Model: React.FC<{ mesh: THREE.SkinnedMesh | THREE.Mesh }> = ({
         action.play();
       }
     }
-  }, [mesh]);
+  }, [mesh, showSkeleton]);
+
+  // Update skeleton helper visibility when showSkeleton changes
+  useEffect(() => {
+    if (skeletonHelperRef.current) {
+      skeletonHelperRef.current.visible = showSkeleton;
+    }
+  }, [showSkeleton]);
 
   useFrame(() => {
     // Update animation mixer
@@ -75,6 +89,9 @@ const Model: React.FC<{ mesh: THREE.SkinnedMesh | THREE.Mesh }> = ({
   return (
     <group ref={groupRef}>
       <primitive object={mesh} />
+      {mesh instanceof THREE.SkinnedMesh && skeletonHelperRef.current && (
+        <primitive object={skeletonHelperRef.current} />
+      )}
     </group>
   );
 };
@@ -96,6 +113,7 @@ const NJViewer: React.FC<NJViewerProps> = ({
   >(new Map());
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [showSkeleton, setShowSkeleton] = useState<boolean>(false);
 
   // Process a single texture entry from a PVM file
   const processTextureEntry = async (entry: PVMEntry, texturePath: string) => {
@@ -459,7 +477,7 @@ const NJViewer: React.FC<NJViewerProps> = ({
           />
 
           {model ? (
-            <Model mesh={model} />
+            <Model mesh={model} showSkeleton={showSkeleton} />
           ) : (
             // Placeholder box while loading
             <mesh>
@@ -472,6 +490,24 @@ const NJViewer: React.FC<NJViewerProps> = ({
           <gridHelper args={[10, 10]} />
           <axesHelper args={[5]} />
         </Canvas>
+      </div>
+
+      {/* Controls Section */}
+      <div className="controls-section" style={{ marginTop: "10px", marginBottom: "10px" }}>
+        <button 
+          onClick={() => setShowSkeleton(!showSkeleton)}
+          className="px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
+          style={{ 
+            padding: "4px 8px",
+            backgroundColor: showSkeleton ? "#4c1d95" : "#2563eb",
+            color: "white", 
+            borderRadius: "4px",
+            border: "none",
+            cursor: "pointer"
+          }}
+        >
+          {showSkeleton ? "Hide Skeleton" : "Show Skeleton"}
+        </button>
       </div>
 
       {/* Texture Debug Panel */}
