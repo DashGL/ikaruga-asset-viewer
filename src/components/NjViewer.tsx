@@ -30,17 +30,12 @@ const Model: React.FC<{ mesh: THREE.SkinnedMesh | THREE.Mesh, showSkeleton: bool
   const groupRef = useRef<THREE.Group>(null);
   const mixer = useRef<THREE.AnimationMixer | null>(null);
   const clock = useRef<THREE.Clock>(new THREE.Clock());
-  const skeletonHelperRef = useRef<THREE.SkeletonHelper | null>(null);
 
   // Initialize animation mixer if it's a skinned mesh
   useEffect(() => {
     if (mesh instanceof THREE.SkinnedMesh && mesh.skeleton) {
       // Create animation mixer for skeletal animation
       mixer.current = new THREE.AnimationMixer(mesh);
-
-      // Create skeleton helper
-      skeletonHelperRef.current = new THREE.SkeletonHelper(mesh);
-      skeletonHelperRef.current.visible = showSkeleton;
 
       // Create a simple animation for demonstration
       const tracks: THREE.KeyframeTrack[] = [];
@@ -70,14 +65,14 @@ const Model: React.FC<{ mesh: THREE.SkinnedMesh | THREE.Mesh, showSkeleton: bool
         action.play();
       }
     }
-  }, [mesh, showSkeleton]);
+  }, [mesh]);
 
   // Update skeleton helper visibility when showSkeleton changes
   useEffect(() => {
-    if (skeletonHelperRef.current) {
-      skeletonHelperRef.current.visible = showSkeleton;
+    if (mesh instanceof THREE.SkinnedMesh && mesh.userData.skeletonHelper) {
+      mesh.userData.skeletonHelper.visible = showSkeleton;
     }
-  }, [showSkeleton]);
+  }, [showSkeleton, mesh]);
 
   useFrame(() => {
     // Update animation mixer
@@ -89,8 +84,8 @@ const Model: React.FC<{ mesh: THREE.SkinnedMesh | THREE.Mesh, showSkeleton: bool
   return (
     <group ref={groupRef}>
       <primitive object={mesh} />
-      {mesh instanceof THREE.SkinnedMesh && skeletonHelperRef.current && (
-        <primitive object={skeletonHelperRef.current} />
+      {mesh instanceof THREE.SkinnedMesh && mesh.userData.skeletonHelper && (
+        <primitive object={mesh.userData.skeletonHelper} />
       )}
     </group>
   );
@@ -292,6 +287,10 @@ const NJViewer: React.FC<NJViewerProps> = ({
     const rootBone = skeleton.bones[0];
     mesh.add(rootBone);
     mesh.bind(skeleton);
+    
+    // Attach skeleton to userData for reference
+    mesh.userData.skeletonHelper = new THREE.SkeletonHelper(mesh);
+    mesh.userData.skeletonHelper.visible = false;
 
     return mesh;
   };
