@@ -97,6 +97,233 @@ const NJViewer: React.FC<NJViewerProps> = ({
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Process a single texture entry from a PVM file
+  const processTextureEntry = async (entry: PVMEntry, texturePath: string) => {
+    try {
+      const { imageData } = await parsePvr(entry.data);
+      
+      const canvas = document.createElement("canvas");
+      canvas.width = imageData.width;
+      canvas.height = imageData.height;
+      canvas.style.border = "1px solid white";
+      canvas.title = entry.name;
+      
+      const context = canvas.getContext("2d");
+      if (!context) return null;
+      
+      context.putImageData(imageData, 0, 0);
+      
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.flipY = false;
+      texture.name = entry.name;
+      texture.needsUpdate = true;
+      
+      texture.userData = {
+        applied: false,
+        path: `${texturePath}/${entry.name}`,
+        fromPVM: true
+      };
+      
+      console.log(`Successfully loaded texture: ${texture.name} (${imageData.width}x${imageData.height}) from PVM`);
+      
+      return { texture, canvas };
+    } catch (err) {
+      console.warn(`Error processing PVR entry ${entry.name} in ${texturePath}:`, err);
+      return null;
+    }
+  };
+  
+  // Process a single PVR file
+  const processPvrFile = async (buffer: ArrayBuffer, texturePath: string, index: number) => {
+    try {
+      const { imageData } = await parsePvr(buffer);
+
+      const canvas = document.createElement("canvas");
+      canvas.width = imageData.width;
+      canvas.height = imageData.height;
+      canvas.style.border = "1px solid white";
+      canvas.title = texturePath.split("/").pop() || "";
+
+      const context = canvas.getContext("2d");
+      if (!context) return null;
+      
+      context.putImageData(imageData, 0, 0);
+
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.flipY = false;
+      texture.name = texturePath.split("/").pop() || "";
+      texture.needsUpdate = true;
+      
+      texture.userData = { 
+        applied: false,
+        index,
+        path: texturePath 
+      };
+
+      console.log(`Successfully loaded texture: ${texture.name} (${imageData.width}x${imageData.height})`);
+      
+      return { texture, canvas, key: index };
+    } catch (err) {
+      console.warn(`Error processing PVR file ${texturePath}:`, err);
+      return null;
+    }
+  };
+  
+  // Process a PVM container file
+  const processPvmFile = async (buffer: ArrayBuffer, texturePath: string) => {
+    try {
+      const entries = await parsePvm(buffer);
+      console.log(`Successfully extracted ${entries.length} textures from PVM`);
+      
+      const results = await Promise.all(
+        entries.map(entry => processTextureEntry(entry, texturePath))
+      );
+      
+      return results.filter(result => result !== null);
+    } catch (err) {
+      console.error(`Failed to parse PVM file ${texturePath}:`, err);
+      return null;
+    }
+  };
+  
+  // Load model with available textures
+  const loadModel = async (modelPath: string, textureMap: Map<number | string, THREE.Texture>) => {
+    try {
+      console.log(`Loading model: ${modelPath}`);
+      const response = await fetch(`/iso/${modelPath}`);
+      if (!response.ok) {
+        throw new Error(`Failed to load model: ${response.statusText}`);
+      }
+
+      const modelBuffer = await response.arrayBuffer();
+      const parsedModel = parseNinjaModel(modelBuffer);
+
+      console.log("Parsed model:", parsedModel);
+      console.log("TextureNames:", parsedModel.textureNames);
+      console.log("Materials count:", parsedModel.materials?.length);
+      
+      if (!parsedModel.geometry || !parsedModel.materials) {
+        throw new Error("Model missing geometry or materials");
+      }
+      
+      // Create materials from the parsed model
+      const materials = parsedModel.materials.map((materialOpts, index) => {
+        // Basic material properties
+        const material = new THREE.MeshPhongMaterial({
+          side: materialOpts.doubleSide ? THREE.DoubleSide : THREE.FrontSide,
+          transparent: materialOpts.blending || false,
+          name: `Material_${index}`,
+        });
+        
+        // Set colors if available
+        if (materialOpts.diffuseColor) {
+          material.color.setRGB(
+            materialOpts.diffuseColor.r,
+            materialOpts.diffuseColor.g,
+            materialOpts.diffuseColor.b
+          );
+          material.opacity = materialOpts.diffuseColor.a;
+        }
+        
+        // Apply textures using different strategies
+        applyTextureToMaterial(material, materialOpts, parsedModel, textureMap, index);
+        
+        return material;
+      });
+      
+      // If no materials defined, create a default material
+      if (materials.length === 0) {
+        materials.push(new THREE.MeshNormalMaterial());
+      }
+      
+      // Log groups info for debugging
+      if (parsedModel.geometry.groups && parsedModel.geometry.groups.length > 0) {
+        console.log("Material groups in geometry:", parsedModel.geometry.groups);
+        parsedModel.geometry.groups.forEach((group, i) => {
+          console.log(`Group ${i}: materialIndex=${group.materialIndex}, start=${group.start}, count=${group.count}`);
+        });
+      } else {
+        console.log("No material groups found in geometry");
+      }
+
+      // Create the mesh with the geometry and materials
+      const mesh = new THREE.Mesh(parsedModel.geometry, materials);
+      console.log("Created mesh with", materials.length, "materials");
+      
+      return mesh;
+    } catch (err) {
+      console.error("Error loading or parsing NJ model:", err);
+      throw err;
+    }
+  };
+  
+  // Apply texture to material using different strategies
+  const applyTextureToMaterial = (
+    material: THREE.MeshPhongMaterial,
+    materialOpts: any,
+    parsedModel: NinjaModel, 
+    textureMap: Map<number | string, THREE.Texture>,
+    materialIndex: number
+  ) => {
+    let textureApplied = false;
+    
+    // Strategy 1: Direct texture name match from PVM
+    if (parsedModel.textureNames && parsedModel.textureNames.length > materialOpts.texId) {
+      const textureName = parsedModel.textureNames[materialOpts.texId];
+      if (textureName && textureMap.has(textureName)) {
+        const texture = textureMap.get(textureName);
+        material.map = texture;
+        material.needsUpdate = true;
+        texture.userData.applied = true;
+        console.log(`Applied texture "${textureName}" directly from PVM to material ${materialIndex}`);
+        textureApplied = true;
+      }
+    }
+    
+    // Strategy 2: By index for single PVR files
+    if (!textureApplied && materialOpts.texId >= 0 && textureMap.has(materialOpts.texId)) {
+      const texture = textureMap.get(materialOpts.texId);
+      material.map = texture;
+      material.needsUpdate = true;
+      texture.userData.applied = true;
+      console.log(`Applied texture by index ${materialOpts.texId} to material ${materialIndex}`);
+      textureApplied = true;
+    }
+    
+    // Strategy 3: Texture name fuzzy matching
+    if (!textureApplied && parsedModel.textureNames && parsedModel.textureNames.length > materialOpts.texId) {
+      const textureName = parsedModel.textureNames[materialOpts.texId];
+      
+      for (const [key, texture] of textureMap.entries()) {
+        if (
+          key === textureName ||
+          (typeof key === 'string' && key.toLowerCase() === textureName.toLowerCase()) ||
+          (typeof key === 'string' && key.split('/').pop()?.split('.')[0]?.toLowerCase() === textureName.toLowerCase())
+        ) {
+          material.map = texture;
+          material.needsUpdate = true;
+          texture.userData.applied = true;
+          console.log(`Applied texture "${key}" to material ${materialIndex} by name matching with "${textureName}"`);
+          textureApplied = true;
+          break;
+        }
+      }
+      
+      if (!textureApplied) {
+        console.log(`No matching texture found for name: ${textureName}`);
+      }
+    }
+    
+    if (!textureApplied) {
+      console.log(`No texture applied to material ${materialIndex} with texId: ${materialOpts.texId}`);
+    }
+    
+    // Always ensure textures are properly updated
+    if (material.map) {
+      material.map.needsUpdate = true;
+    }
+  };
+  
   // Combined loading function for sequential loading
   useEffect(() => {
     const loadAll = async () => {
@@ -107,15 +334,14 @@ const NJViewer: React.FC<NJViewerProps> = ({
       try {
         // Step 1: Load textures first
         console.log("Step 1: Loading textures");
-        const textureMap = new Map<number, THREE.Texture>();
-        const canvasesMap = new Map<number, HTMLCanvasElement>();
+        const textureMap = new Map<number | string, THREE.Texture>();
+        const canvasesMap = new Map<number | string, HTMLCanvasElement>();
 
         if (texturePaths.length > 0) {
           for (let i = 0; i < texturePaths.length; i++) {
             const texturePath = texturePaths[i];
             try {
               console.log(`Loading texture from: /iso/${texturePath}`);
-              // Fetch the PVR/PVM file
               const response = await fetch(`/iso/${texturePath}`);
               if (!response.ok) {
                 console.warn(`Failed to load texture: ${texturePath}`);
@@ -123,99 +349,35 @@ const NJViewer: React.FC<NJViewerProps> = ({
               }
 
               const buffer = await response.arrayBuffer();
-              
-              // Check if this is a PVM file (container) or direct PVR
               const isPVM = texturePath.toLowerCase().endsWith('.pvm');
               
               if (isPVM) {
                 console.log("Processing PVM file...");
-                try {
-                  // Parse the PVM container to get all textures inside
-                  const entries = await parsePvm(buffer);
-                  console.log(`Successfully extracted ${entries.length} textures from PVM`);
-                  
-                  // Process each texture in the PVM
-                  for (let j = 0; j < entries.length; j++) {
-                    const entry = entries[j];
-                    try {
-                      // Parse the individual PVR texture
-                      const { imageData } = await parsePvr(entry.data);
-                      
-                      // Create a Three.js texture from the parsed image data
-                      const canvas = document.createElement("canvas");
-                      canvas.width = imageData.width;
-                      canvas.height = imageData.height;
-                      canvas.style.border = "1px solid white";
-                      canvas.title = entry.name;
-                      
-                      const context = canvas.getContext("2d");
-                      if (context) {
-                        context.putImageData(imageData, 0, 0);
-                        
-                        const texture = new THREE.CanvasTexture(canvas);
-                        texture.flipY = false; // PVR textures don't need to be flipped
-                        texture.name = entry.name;
-                        texture.needsUpdate = true; // Ensure texture updates
-                        
-                        // For debugging, add an attribute to track where the texture is applied
-                        texture.userData = {
-                          applied: false,
-                          index: j,
-                          path: `${texturePath}/${entry.name}`,
-                          fromPVM: true
-                        };
-                        
-                        console.log(`Successfully loaded texture: ${texture.name} (${imageData.width}x${imageData.height}) from PVM`);
-                        
-                        // Store texture and canvas - use the texture name as the key for matching
-                        textureMap.set(entry.name, texture);
-                        canvasesMap.set(entry.name, canvas);
-                      }
-                    } catch (err) {
-                      console.warn(`Error processing PVR entry ${entry.name} in ${texturePath}:`, err);
+                const results = await processPvmFile(buffer, texturePath);
+                
+                if (results) {
+                  results.forEach(result => {
+                    if (result) {
+                      textureMap.set(result.texture.name, result.texture);
+                      canvasesMap.set(result.texture.name, result.canvas);
                     }
-                  }
-                  
-                  // Skip the rest of the loop for this PVM since we've processed all entries
-                  continue;
-                } catch (err) {
-                  console.error(`Failed to parse PVM file ${texturePath}:`, err);
-                  // Fall back to treating it as a regular PVR if the PVM parsing fails
+                  });
+                } else {
+                  // Fall back to treating as PVR if PVM parsing fails
                   console.warn("Falling back to treating as regular PVR file...");
+                  const result = await processPvrFile(buffer, texturePath, i);
+                  if (result) {
+                    textureMap.set(result.key, result.texture);
+                    canvasesMap.set(result.key, result.canvas);
+                  }
                 }
-              }
-              
-              // If we get here, handle as a regular PVR file
-              const { imageData } = await parsePvr(buffer);
-
-              // Create a Three.js texture from the parsed image data
-              const canvas = document.createElement("canvas");
-              canvas.width = imageData.width;
-              canvas.height = imageData.height;
-              canvas.style.border = "1px solid white";
-              canvas.title = texturePath.split("/").pop() || "";
-
-              const context = canvas.getContext("2d");
-              if (context) {
-                context.putImageData(imageData, 0, 0);
-
-                const texture = new THREE.CanvasTexture(canvas);
-                texture.flipY = false; // PVR textures don't need to be flipped
-                texture.name = texturePath.split("/").pop() || "";
-                texture.needsUpdate = true; // Ensure texture updates
-                
-                // For debugging, add an attribute to track where the texture is applied
-                texture.userData = { 
-                  applied: false,
-                  index: i,
-                  path: texturePath 
-                };
-
-                console.log(`Successfully loaded texture: ${texture.name} (${imageData.width}x${imageData.height})`);
-                
-                // Store texture and canvas
-                textureMap.set(i, texture);
-                canvasesMap.set(i, canvas);
+              } else {
+                // Process as regular PVR file
+                const result = await processPvrFile(buffer, texturePath, i);
+                if (result) {
+                  textureMap.set(result.key, result.texture);
+                  canvasesMap.set(result.key, result.canvas);
+                }
               }
             } catch (err) {
               console.warn(`Error loading texture ${texturePath}:`, err);
@@ -229,136 +391,12 @@ const NJViewer: React.FC<NJViewerProps> = ({
         setTextures(textureMap);
         setTextureCanvases(canvasesMap);
         
-        // Step 2: Now load and process the model with the loaded textures
-        console.log("Step 2: Loading model with textures available");
-        
+        // Step 2: Now load the model with the loaded textures
         try {
-          console.log(`Loading model: ${modelPath}`);
-          // Fetch the NJ file
-          const response = await fetch(`/iso/${modelPath}`);
-          if (!response.ok) {
-            throw new Error(`Failed to load model: ${response.statusText}`);
-          }
-
-          // Get the model data as ArrayBuffer
-          const modelBuffer = await response.arrayBuffer();
-          const parsedModel = parseNinjaModel(modelBuffer);
-
-          console.log("Parsed model:", parsedModel);
-          console.log("TextureNames:", parsedModel.textureNames);
-          console.log("Materials count:", parsedModel.materials?.length);
-          
-          if (parsedModel.geometry && parsedModel.materials) {
-            // Create materials from the parsed model
-            const materials: THREE.Material[] = parsedModel.materials.map((materialOpts, index) => {
-              // Basic material properties
-              const material = new THREE.MeshPhongMaterial({
-                side: materialOpts.doubleSide ? THREE.DoubleSide : THREE.FrontSide,
-                transparent: materialOpts.blending || false,
-                name: `Material_${index}`,
-              });
-              
-              // Set colors if available
-              if (materialOpts.diffuseColor) {
-                material.color.setRGB(
-                  materialOpts.diffuseColor.r,
-                  materialOpts.diffuseColor.g,
-                  materialOpts.diffuseColor.b
-                );
-                material.opacity = materialOpts.diffuseColor.a;
-              }
-              
-              let textureApplied = false;
-              
-              // For PVM files, the texture names are directly used as keys
-              if (parsedModel.textureNames && parsedModel.textureNames.length > materialOpts.texId) {
-                const textureName = parsedModel.textureNames[materialOpts.texId];
-                if (textureName && textureMap.has(textureName)) {
-                  // Direct match by texture name from PVM
-                  const texture = textureMap.get(textureName);
-                  material.map = texture;
-                  material.needsUpdate = true;
-                  texture.userData.applied = true;
-                  console.log(`Applied texture "${textureName}" directly from PVM to material ${index}`);
-                  textureApplied = true;
-                }
-              }
-              
-              // If no texture applied yet, try by index for single PVR files
-              if (!textureApplied && materialOpts.texId >= 0 && textureMap.has(materialOpts.texId)) {
-                const texture = textureMap.get(materialOpts.texId);
-                material.map = texture;
-                material.needsUpdate = true;
-                texture.userData.applied = true;
-                console.log(`Applied texture by index ${materialOpts.texId} to material ${index}`);
-                textureApplied = true;
-              }
-              
-              // If still no texture, try texture name matching with filenames
-              if (!textureApplied && parsedModel.textureNames && parsedModel.textureNames.length > materialOpts.texId) {
-                const textureName = parsedModel.textureNames[materialOpts.texId];
-                
-                // Try all keys in textureMap to find a matching filename pattern
-                for (const [key, texture] of textureMap.entries()) {
-                  if (
-                    // Try exact match first
-                    key === textureName ||
-                    // Try matching with case insensitivity 
-                    key.toLowerCase() === textureName.toLowerCase() ||
-                    // Try matching the end of the key (filename part)
-                    key.split('/').pop()?.split('.')[0]?.toLowerCase() === textureName.toLowerCase()
-                  ) {
-                    material.map = texture;
-                    material.needsUpdate = true;
-                    texture.userData.applied = true;
-                    console.log(`Applied texture "${key}" to material ${index} by name matching with "${textureName}"`);
-                    textureApplied = true;
-                    break;
-                  }
-                }
-                
-                if (!textureApplied) {
-                  console.log(`No matching texture found for name: ${textureName}`);
-                }
-              }
-              
-              if (!textureApplied) {
-                console.log(`No texture applied to material ${index} with texId: ${materialOpts.texId}`);
-              }
-              
-              // Always ensure textures are properly updated
-              if (material.map) {
-                material.map.needsUpdate = true;
-              }
-              
-              return material;
-            });
-            
-            // If no materials defined, create a default material
-            if (materials.length === 0) {
-              materials.push(new THREE.MeshNormalMaterial());
-            }
-            
-            // Log groups info for debugging
-            if (parsedModel.geometry.groups && parsedModel.geometry.groups.length > 0) {
-              console.log("Material groups in geometry:", parsedModel.geometry.groups);
-              parsedModel.geometry.groups.forEach((group, i) => {
-                console.log(`Group ${i}: materialIndex=${group.materialIndex}, start=${group.start}, count=${group.count}`);
-              });
-            } else {
-              console.log("No material groups found in geometry");
-            }
-
-            // Create the mesh with the geometry and materials
-            const mesh = new THREE.Mesh(parsedModel.geometry, materials);
-            console.log("Created mesh with", materials.length, "materials");
-            setModel(mesh);
-          }
+          const mesh = await loadModel(modelPath, textureMap);
+          setModel(mesh);
         } catch (err) {
-          console.error("Error loading or parsing NJ model:", err);
-          setError(
-            err instanceof Error ? err.message : "Unknown error loading model",
-          );
+          setError(err instanceof Error ? err.message : "Unknown error loading model");
         }
       } catch (err) {
         console.error("Error in sequential loading process:", err);
