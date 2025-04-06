@@ -1,4 +1,8 @@
 import {
+  AnimationClip,
+  VectorKeyframeTrack,
+  QuaternionKeyframeTrack,
+  NormalAnimationBlendMode,
   Bone,
   Vector3,
   Euler,
@@ -12,6 +16,7 @@ import {
   Material,
   DoubleSide,
 } from "three";
+import type { AnimationClipJSON } from "three";
 import ByteReader from "bytereader";
 
 interface MaterialOptions {
@@ -43,8 +48,8 @@ interface Vertex {
 
 // Better organized vertex storage
 class VertexList {
-  private vertices: Vertex[] = [];
-  
+  private vertices: (Vertex | null)[] = [];
+
   addVertex(vertex: Vertex, index: number): void {
     // Ensure array is large enough
     while (this.vertices.length <= index) {
@@ -52,24 +57,24 @@ class VertexList {
     }
     this.vertices[index] = vertex;
   }
-  
+
   getVertex(index: number): Vertex | null {
     if (index < 0 || index >= this.vertices.length) {
       return null;
     }
     return this.vertices[index];
   }
-  
+
   setUV(index: number, u: number, v: number): void {
     if (index >= 0 && index < this.vertices.length && this.vertices[index]) {
       this.vertices[index].uv = { x: u, y: v };
     }
   }
-  
+
   getAllVertices(): Vertex[] {
-    return this.vertices.filter(v => v !== null);
+    return this.vertices.filter((v) => v !== null);
   }
-  
+
   getTriangleData(indices: number[]): {
     positions: number[];
     normals: number[];
@@ -84,40 +89,40 @@ class VertexList {
     const uvs: number[] = [];
     const skinIndices: number[] = [];
     const skinWeights: number[] = [];
-    
+
     // Process each index and extract data
     for (const idx of indices) {
       const vertex = this.getVertex(idx);
       if (!vertex) continue;
-      
+
       // Add position
       positions.push(vertex.position.x, vertex.position.y, vertex.position.z);
-      
+
       // Add normal if exists
       if (vertex.normal) {
         normals.push(vertex.normal.x, vertex.normal.y, vertex.normal.z);
       }
-      
+
       // Add color if exists
       if (vertex.color) {
         const alpha = vertex.color.a < 0.3 ? 0.3 : vertex.color.a; // Ensure minimum alpha
         colors.push(vertex.color.r, vertex.color.g, vertex.color.b, alpha);
       }
-      
+
       // Add UV if exists
       if (vertex.uv) {
         uvs.push(vertex.uv.x, vertex.uv.y);
       } else {
         uvs.push(0, 0); // Default UV
       }
-      
+
       // Add skinning data if exists
       if (vertex.skinIndices && vertex.skinWeights) {
         skinIndices.push(...vertex.skinIndices);
         skinWeights.push(...vertex.skinWeights);
       }
     }
-    
+
     return { positions, normals, colors, uvs, skinIndices, skinWeights };
   }
 }
@@ -570,7 +575,7 @@ class NinjaModel {
     // Check if material already exists
     for (let i = 0; i < this.materials.length; i++) {
       const mat = this.materials[i];
-      
+
       // Check basic properties
       if (
         mat.texId === this.currentMaterial.texId &&
@@ -578,10 +583,19 @@ class NinjaModel {
         mat.doubleSide === this.currentMaterial.doubleSide
       ) {
         // Check color properties if they exist
-        const diffuseMatch = this.colorsEqual(mat.diffuseColor, this.currentMaterial.diffuseColor);
-        const specularMatch = this.colorsEqual(mat.specularColor, this.currentMaterial.specularColor);
-        const ambientMatch = this.colorsEqual(mat.ambientColor, this.currentMaterial.ambientColor);
-        
+        const diffuseMatch = this.colorsEqual(
+          mat.diffuseColor,
+          this.currentMaterial.diffuseColor,
+        );
+        const specularMatch = this.colorsEqual(
+          mat.specularColor,
+          this.currentMaterial.specularColor,
+        );
+        const ambientMatch = this.colorsEqual(
+          mat.ambientColor,
+          this.currentMaterial.ambientColor,
+        );
+
         if (diffuseMatch && specularMatch && ambientMatch) {
           return i; // Reuse existing material
         }
@@ -594,23 +608,29 @@ class NinjaModel {
       texId: this.currentMaterial.texId,
       blending: this.currentMaterial.blending,
       doubleSide: this.currentMaterial.doubleSide,
-      diffuseColor: this.currentMaterial.diffuseColor ? { ...this.currentMaterial.diffuseColor } : undefined,
-      specularColor: this.currentMaterial.specularColor ? { ...this.currentMaterial.specularColor } : undefined,
-      ambientColor: this.currentMaterial.ambientColor ? { ...this.currentMaterial.ambientColor } : undefined,
+      diffuseColor: this.currentMaterial.diffuseColor
+        ? { ...this.currentMaterial.diffuseColor }
+        : undefined,
+      specularColor: this.currentMaterial.specularColor
+        ? { ...this.currentMaterial.specularColor }
+        : undefined,
+      ambientColor: this.currentMaterial.ambientColor
+        ? { ...this.currentMaterial.ambientColor }
+        : undefined,
     });
 
     return materialIndex;
   }
-  
+
   private colorsEqual(
-    color1?: { r: number; g: number; b: number; a: number }, 
-    color2?: { r: number; g: number; b: number; a: number }
+    color1?: { r: number; g: number; b: number; a: number },
+    color2?: { r: number; g: number; b: number; a: number },
   ): boolean {
     // If both are undefined or null, they're equal
     if (!color1 && !color2) return true;
     // If only one is undefined or null, they're not equal
     if (!color1 || !color2) return false;
-    
+
     // Compare values with a small epsilon for float comparison
     const epsilon = 0.00001;
     return (
@@ -696,20 +716,28 @@ class NinjaModel {
         // Determine vertex order based on clockwise flag and index parity
         const indices = [];
         if ((clockwise && !(i % 2)) || (!clockwise && i % 2)) {
-          indices.push(strip[i].vertex.globalIndex, strip[i+2].vertex.globalIndex, strip[i+1].vertex.globalIndex);
+          indices.push(
+            strip[i].vertex.globalIndex,
+            strip[i + 2].vertex.globalIndex,
+            strip[i + 1].vertex.globalIndex,
+          );
         } else {
-          indices.push(strip[i].vertex.globalIndex, strip[i+1].vertex.globalIndex, strip[i+2].vertex.globalIndex);
+          indices.push(
+            strip[i].vertex.globalIndex,
+            strip[i + 1].vertex.globalIndex,
+            strip[i + 2].vertex.globalIndex,
+          );
         }
-        
+
         // Skip if any vertex is missing
-        if (indices.some(idx => idx === undefined)) continue;
-        
+        if (indices.some((idx) => idx === undefined)) continue;
+
         // Store material index for this triangle
         this.materialIndices.push(materialIndex);
-        
+
         // Process vertex data for this triangle
         const triangleData = this.vertexList.getTriangleData(indices);
-        
+
         // Add all data to the respective arrays
         this.vertices.push(...triangleData.positions);
         if (triangleData.normals.length > 0) {
@@ -717,9 +745,12 @@ class NinjaModel {
         }
         this.colors.push(...triangleData.colors);
         this.uvs.push(...triangleData.uvs);
-        
+
         // Add skinning data if available
-        if (triangleData.skinIndices.length > 0 && triangleData.skinWeights.length > 0) {
+        if (
+          triangleData.skinIndices.length > 0 &&
+          triangleData.skinWeights.length > 0
+        ) {
           this.skinIndices.push(...triangleData.skinIndices);
           this.skinWeights.push(...triangleData.skinWeights);
         }
@@ -728,6 +759,10 @@ class NinjaModel {
 
     this.reader.seek(expectedEnd);
     console.log("Strip end: ", this.reader.tellf());
+  }
+
+  getBones(): Bone[] {
+    return this.bones;
   }
 
   getGeometry(): BufferGeometry {
@@ -791,7 +826,7 @@ class NinjaModel {
   getMaterials(): MaterialOptions[] {
     return this.materials;
   }
-  
+
   getMaterialIndices(): number[] {
     return this.materialIndices;
   }
@@ -824,7 +859,206 @@ interface ParsedNinjaModel {
   textureNames?: string[];
   materials?: MaterialOptions[];
   materialIndices?: number[]; // Material index for each triangle/face
+  bones?: Bone[];
+  clips?: AnimationClip[];
 }
+
+type MotionItem = {
+  posOffset: number;
+  rotOffset: number;
+  rotSmallOffset: number;
+  sclOffset: number;
+  quatOffset: number;
+  posCount: number;
+  rotCount: number;
+  rotSmallCount: number;
+  sclCount: number;
+  quatCount: number;
+};
+
+const readAnimation = (reader: ByteReader, bones: Bone[], num: number) => {
+  const motionOfs = reader.readUInt32();
+  const nbFrame = reader.readUInt32();
+  const motionType = reader.readUInt16();
+  const motionFlag = reader.readUInt16();
+
+  const duration = (nbFrame - 1) / 30;
+  const motionList: MotionItem[] = [];
+  const POS_BIT = 0x01;
+  const ROT_BIT = 0x02;
+  const ROT_SMALL_BIT = 0x20;
+  const SCL_BIT = 0x04;
+  const QUAT_BIT = 0x2000;
+
+  reader.seek(motionOfs);
+  for (let i = 0; i < bones.length; i++) {
+    const item = {
+      posOffset: 0,
+      rotOffset: 0,
+      rotSmallOffset: 0,
+      sclOffset: 0,
+      quatOffset: 0,
+      posCount: 0,
+      rotCount: 0,
+      rotSmallCount: 0,
+      sclCount: 0,
+      quatCount: 0,
+    };
+
+    // First we read offsets
+    if (motionType & POS_BIT) {
+      item.posOffset = reader.readUInt32();
+    }
+
+    if (motionType & ROT_BIT) {
+      item.rotOffset = reader.readUInt32();
+    }
+
+    if (motionType & ROT_SMALL_BIT) {
+      item.rotSmallOffset = reader.readUInt32();
+    }
+
+    if (motionType & SCL_BIT) {
+      item.sclOffset = reader.readUInt32();
+    }
+
+    if (motionType & QUAT_BIT) {
+      item.quatOffset = reader.readUInt32();
+    }
+
+    // First we read counts
+    if (motionType & POS_BIT) {
+      item.posCount = reader.readUInt32();
+    }
+
+    if (motionType & ROT_BIT) {
+      item.rotCount = reader.readUInt32();
+    }
+
+    if (motionType & ROT_SMALL_BIT) {
+      item.rotSmallCount = reader.readUInt32();
+    }
+
+    if (motionType & SCL_BIT) {
+      item.sclCount = reader.readUInt32();
+    }
+
+    if (motionType & QUAT_BIT) {
+      item.quatCount = reader.readUInt32();
+    }
+
+    motionList.push(item);
+  }
+
+  const tracks: VectorKeyframeTrack | QuaternionKeyframeTrack[] = [];
+  // Go through and read the position track values
+  motionList.forEach(({ posOffset, posCount }, index) => {
+    if (posCount === 0) {
+      return;
+    }
+
+    const bone = bones[index];
+    const name = `${bone.name}.position`;
+    reader.seek(posOffset);
+    const times: number[] = [];
+    const positionValues: number[] = [];
+    for (let i = 0; i < posCount; i++) {
+      const time = reader.readUInt32() / 30;
+      times.push(time);
+      const x = reader.readFloat();
+      const y = reader.readFloat();
+      const z = reader.readFloat();
+      positionValues.push(x, y, z);
+    }
+
+    const posTrack = new VectorKeyframeTrack(name, times, positionValues);
+    tracks.push(posTrack);
+  });
+
+  // Go through and read the position track values
+  motionList.forEach((item, index) => {
+    const { rotCount, rotSmallCount, quatCount } = item;
+    const { rotOffset, rotSmallOffset, quatOffset } = item;
+
+    const bone = bones[index];
+    const name = `${bone.name}.quaternion`;
+    const times: number[] = [];
+    const rotValues: number[] = [];
+    if (rotCount) {
+      reader.seek(rotOffset);
+      for (let i = 0; i < rotCount; i++) {
+        const time = reader.readUInt32() / 30;
+        times.push(time);
+        const x = reader.readInt32() * ((2 * Math.PI) / 0xffff);
+        const y = reader.readInt32() * ((2 * Math.PI) / 0xffff);
+        const z = reader.readInt32() * ((2 * Math.PI) / 0xffff);
+        const euler = new Euler(x, y, z, "XYZ");
+        const quat = new Quaternion().setFromEuler(euler);
+        rotValues.push(quat.x, quat.y, quat.z, quat.w);
+      }
+    } else if (rotSmallCount) {
+      reader.seek(rotSmallOffset);
+      for (let i = 0; i < rotSmallCount; i++) {
+        const time = reader.readInt16() / 30;
+        times.push(time);
+        const x = reader.readInt16() * ((2 * Math.PI) / 0xffff);
+        const y = reader.readInt16() * ((2 * Math.PI) / 0xffff);
+        const z = reader.readInt16() * ((2 * Math.PI) / 0xffff);
+        const euler = new Euler(x, y, z, "XYZ");
+        const quat = new Quaternion().setFromEuler(euler);
+        rotValues.push(quat.x, quat.y, quat.z, quat.w);
+      }
+    } else if (quatCount) {
+      reader.seek(quatOffset);
+      for (let i = 0; i < quatCount; i++) {
+        const time = reader.readUInt32() / 30;
+        times.push(time);
+        const w = reader.readFloat();
+        const x = reader.readFloat();
+        const y = reader.readFloat();
+        const z = reader.readFloat();
+        rotValues.push(x, y, z, w);
+      }
+    } else {
+      return;
+    }
+
+    const rotTrack = new QuaternionKeyframeTrack(name, times, rotValues);
+    tracks.push(rotTrack);
+  });
+
+  // Go through each of the scale tracks
+  motionList.forEach(({ sclOffset, sclCount }, index) => {
+    if (sclCount === 0) {
+      return;
+    }
+
+    const bone = bones[index];
+    const name = `${bone.name}.scale`;
+    reader.seek(sclOffset);
+    const times: number[] = [];
+    const scaleValues: number[] = [];
+    for (let i = 0; i < sclCount; i++) {
+      const time = reader.readUInt32() / 30;
+      times.push(time);
+      const x = reader.readFloat();
+      const y = reader.readFloat();
+      const z = reader.readFloat();
+      scaleValues.push(x, y, z);
+    }
+
+    const sclTrack = new VectorKeyframeTrack(name, times, scaleValues);
+    tracks.push(sclTrack);
+  });
+
+  const clip = new AnimationClip(
+    `anim_${num.toString().padStart(3, "0")}`,
+    duration,
+    tracks,
+  );
+  clip.optimize();
+  return clip;
+};
 
 const parseNinjaModel = (buffer: ArrayBuffer): ParsedNinjaModel => {
   console.log("Parsing Ninja model");
@@ -848,6 +1082,19 @@ const parseNinjaModel = (buffer: ArrayBuffer): ParsedNinjaModel => {
       result.geometry = model.getGeometry();
       result.materials = model.getMaterials();
       result.materialIndices = model.getMaterialIndices();
+      result.bones = model.getBones();
+    } else if (magic === "NMDM") {
+      if (!result.bones) {
+        continue;
+      }
+      result.clips = result.clips || [];
+      console.log("FOUND ANIMATION!!!!!", result.clips.length);
+      try {
+        const anim = readAnimation(chunk, result.bones, result.clips.length);
+        result.clips.push(anim);
+      } catch (err) {
+        throw err;
+      }
     } else if (magic === "POF0") {
       continue;
     } else {
