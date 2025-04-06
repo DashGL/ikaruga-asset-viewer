@@ -10,6 +10,7 @@ import {
   AnimationClip,
   VectorKeyframeTrack,
   SkeletonHelper,
+  AnimationAction,
 } from "three";
 import { parsePvr, parsePvm } from "../lib/parsePvr";
 import type { PVMEntry } from "../lib/parsePvr";
@@ -23,49 +24,82 @@ interface NJViewerProps {
 }
 
 // Component to handle the rotation of the model and animation
-const Model: React.FC<{ mesh: THREE.SkinnedMesh | THREE.Mesh, showSkeleton: boolean }> = ({
+const Model: React.FC<{ 
+  mesh: THREE.SkinnedMesh | THREE.Mesh, 
+  showSkeleton: boolean,
+  animations: THREE.AnimationClip[],
+  currentAnimation: number | null,
+  isPlaying: boolean,
+  animationSpeed: number,
+  setCurrentFrame: React.Dispatch<React.SetStateAction<number>>,
+  setTotalFrames: React.Dispatch<React.SetStateAction<number>>,
+  mixerRef: React.MutableRefObject<THREE.AnimationMixer | null>
+}> = ({
   mesh,
-  showSkeleton
+  showSkeleton,
+  animations,
+  currentAnimation,
+  isPlaying,
+  animationSpeed,
+  setCurrentFrame,
+  setTotalFrames,
+  mixerRef
 }) => {
   const groupRef = useRef<THREE.Group>(null);
-  const mixer = useRef<THREE.AnimationMixer | null>(null);
   const clock = useRef<THREE.Clock>(new THREE.Clock());
+  const currentAction = useRef<THREE.AnimationAction | null>(null);
 
   // Initialize animation mixer if it's a skinned mesh
   useEffect(() => {
     if (mesh instanceof THREE.SkinnedMesh && mesh.skeleton) {
       // Create animation mixer for skeletal animation
-      mixer.current = new THREE.AnimationMixer(mesh);
-
-      // Create a simple animation for demonstration
-      const tracks: THREE.KeyframeTrack[] = [];
-      const times = [0, 1, 2]; // keyframe times
-      const positions = [
-        // Initial position
-        0, 0, 0,
-        // Slightly moved
-        0, 0.1, 0,
-        // Back to initial
-        0, 0, 0,
-      ];
-
-      // Create position track for the first bone if it exists
-      if (mesh.skeleton.bones.length > 0) {
-        const positionKF = new THREE.VectorKeyframeTrack(
-          `.skeleton.bones[0].position`,
-          times,
-          positions,
-        );
-        tracks.push(positionKF);
-
-        // Create a clip and play it
-        const clip = new THREE.AnimationClip("simpleAnimation", 2, tracks);
-        const action = mixer.current.clipAction(clip);
-        action.setLoop(THREE.LoopRepeat, Infinity);
-        action.play();
-      }
+      mixerRef.current = new THREE.AnimationMixer(mesh);
     }
-  }, [mesh]);
+  }, [mesh, mixerRef]);
+
+  // Update active animation when currentAnimation changes
+  useEffect(() => {
+    if (!mixerRef.current) return;
+    
+    // Stop current animation if exists
+    if (currentAction.current) {
+      currentAction.current.stop();
+      currentAction.current = null;
+    }
+    
+    // Start new animation if selected
+    if (currentAnimation !== null && animations[currentAnimation]) {
+      const clip = animations[currentAnimation];
+      currentAction.current = mixerRef.current.clipAction(clip);
+      currentAction.current.setLoop(THREE.LoopRepeat, Infinity);
+      currentAction.current.timeScale = animationSpeed;
+      currentAction.current.play();
+      
+      // Set total frames based on animation duration
+      const totalFrames = Math.floor(clip.duration * 30); // assuming 30fps
+      setTotalFrames(totalFrames);
+    } else {
+      setTotalFrames(0);
+    }
+  }, [currentAnimation, animations, mixerRef, animationSpeed, setTotalFrames]);
+
+  // Handle play/pause state
+  useEffect(() => {
+    if (!currentAction.current) return;
+    
+    if (isPlaying) {
+      currentAction.current.paused = false;
+    } else {
+      currentAction.current.paused = true;
+    }
+  }, [isPlaying]);
+
+  // Update animation speed
+  useEffect(() => {
+    if (currentAction.current) {
+      currentAction.current.timeScale = animationSpeed;
+    }
+  }, [animationSpeed]);
 
   // Update skeleton helper visibility when showSkeleton changes
   useEffect(() => {
@@ -76,8 +110,16 @@ const Model: React.FC<{ mesh: THREE.SkinnedMesh | THREE.Mesh, showSkeleton: bool
 
   useFrame(() => {
     // Update animation mixer
-    if (mixer.current) {
-      mixer.current.update(clock.current.getDelta());
+    if (mixerRef.current && currentAction.current) {
+      mixerRef.current.update(clock.current.getDelta());
+      
+      // Update current frame
+      if (currentAnimation !== null && animations[currentAnimation]) {
+        const clip = animations[currentAnimation];
+        const clipTime = mixerRef.current.time % clip.duration;
+        const frame = Math.floor(clipTime * 30); // assuming 30fps
+        setCurrentFrame(frame);
+      }
     }
   });
 
@@ -109,6 +151,13 @@ const NJViewer: React.FC<NJViewerProps> = ({
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [showSkeleton, setShowSkeleton] = useState<boolean>(false);
+  const [animations, setAnimations] = useState<THREE.AnimationClip[]>([]);
+  const [currentAnimation, setCurrentAnimation] = useState<number | null>(null);
+  const [isPlaying, setIsPlaying] = useState<boolean>(true);
+  const [animationSpeed, setAnimationSpeed] = useState<number>(1.0);
+  const [currentFrame, setCurrentFrame] = useState<number>(0);
+  const [totalFrames, setTotalFrames] = useState<number>(0);
+  const mixerRef = useRef<THREE.AnimationMixer | null>(null);
 
   // Process a single texture entry from a PVM file
   const processTextureEntry = async (entry: PVMEntry, texturePath: string) => {
@@ -227,6 +276,15 @@ const NJViewer: React.FC<NJViewerProps> = ({
     console.log("Parsed model:", parsedModel);
     console.log("TextureNames:", parsedModel.textureNames);
     console.log("Materials count:", parsedModel.materials?.length);
+    
+    // Check if animations exist and log them
+    if (parsedModel.clips && parsedModel.clips.length > 0) {
+      console.log("Animations found:", parsedModel.clips.length);
+      setAnimations(parsedModel.clips);
+    } else {
+      console.log("No animations found");
+      setAnimations([]);
+    }
 
     if (!parsedModel.geometry || !parsedModel.materials) {
       throw new Error("Model missing geometry or materials");
@@ -476,7 +534,17 @@ const NJViewer: React.FC<NJViewerProps> = ({
           />
 
           {model ? (
-            <Model mesh={model} showSkeleton={showSkeleton} />
+            <Model 
+              mesh={model} 
+              showSkeleton={showSkeleton} 
+              animations={animations}
+              currentAnimation={currentAnimation}
+              isPlaying={isPlaying}
+              animationSpeed={animationSpeed}
+              setCurrentFrame={setCurrentFrame}
+              setTotalFrames={setTotalFrames}
+              mixerRef={mixerRef}
+            />
           ) : (
             // Placeholder box while loading
             <mesh>
@@ -493,20 +561,161 @@ const NJViewer: React.FC<NJViewerProps> = ({
 
       {/* Controls Section */}
       <div className="controls-section" style={{ marginTop: "10px", marginBottom: "10px" }}>
-        <button 
-          onClick={() => setShowSkeleton(!showSkeleton)}
-          className="px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
-          style={{ 
-            padding: "4px 8px",
-            backgroundColor: showSkeleton ? "#4c1d95" : "#2563eb",
-            color: "white", 
-            borderRadius: "4px",
-            border: "none",
-            cursor: "pointer"
-          }}
-        >
-          {showSkeleton ? "Hide Skeleton" : "Show Skeleton"}
-        </button>
+        <div style={{ display: "flex", gap: "10px", marginBottom: "10px" }}>
+          <button 
+            onClick={() => setShowSkeleton(!showSkeleton)}
+            className="px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
+            style={{ 
+              padding: "4px 8px",
+              backgroundColor: showSkeleton ? "#4c1d95" : "#2563eb",
+              color: "white", 
+              borderRadius: "4px",
+              border: "none",
+              cursor: "pointer"
+            }}
+          >
+            {showSkeleton ? "Hide Skeleton" : "Show Skeleton"}
+          </button>
+        </div>
+
+        {/* Animation Controls - Only show if animations exist */}
+        {animations.length > 0 && (
+          <div className="animation-controls" style={{ 
+            display: "flex", 
+            flexDirection: "column", 
+            gap: "10px", 
+            backgroundColor: "#1a1a2e", 
+            padding: "12px", 
+            borderRadius: "6px" 
+          }}>
+            <h3 style={{ fontSize: "14px", margin: "0 0 10px 0", color: "white" }}>Animation Controls</h3>
+            
+            {/* Animation Selection */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                <label style={{ color: "white", display: "flex", alignItems: "center", gap: "4px" }}>
+                  <input 
+                    type="radio" 
+                    name="animation" 
+                    checked={currentAnimation === null} 
+                    onChange={() => setCurrentAnimation(null)}
+                  />
+                  None
+                </label>
+                {animations.map((anim, index) => (
+                  <label 
+                    key={index} 
+                    style={{ color: "white", display: "flex", alignItems: "center", gap: "4px" }}
+                  >
+                    <input 
+                      type="radio" 
+                      name="animation" 
+                      checked={currentAnimation === index} 
+                      onChange={() => setCurrentAnimation(index)}
+                    />
+                    {anim.name}
+                  </label>
+                ))}
+              </div>
+            </div>
+            
+            {/* Animation playback controls */}
+            {currentAnimation !== null && (
+              <>
+                {/* Playback buttons */}
+                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                  <button 
+                    onClick={() => setIsPlaying(!isPlaying)} 
+                    style={{ 
+                      padding: "4px 8px", 
+                      backgroundColor: "#4C1D95", 
+                      color: "white", 
+                      border: "none", 
+                      borderRadius: "4px", 
+                      cursor: "pointer" 
+                    }}
+                  >
+                    {isPlaying ? "Pause" : "Play"}
+                  </button>
+                  
+                  <button 
+                    onClick={() => {
+                      if (mixerRef.current && currentAnimation !== null && animations[currentAnimation]) {
+                        // Jump to previous frame
+                        const clip = animations[currentAnimation];
+                        let newFrame = currentFrame - 1;
+                        if (newFrame < 0) newFrame = totalFrames - 1;
+                        mixerRef.current.setTime((newFrame / 30) % clip.duration);
+                      }
+                    }}
+                    style={{ 
+                      padding: "4px 8px", 
+                      backgroundColor: "#374151", 
+                      color: "white", 
+                      border: "none", 
+                      borderRadius: "4px", 
+                      cursor: "pointer" 
+                    }}
+                  >
+                    ⏮ Prev Frame
+                  </button>
+                  
+                  <button 
+                    onClick={() => {
+                      if (mixerRef.current && currentAnimation !== null && animations[currentAnimation]) {
+                        // Jump to next frame
+                        const clip = animations[currentAnimation];
+                        const newFrame = (currentFrame + 1) % totalFrames;
+                        mixerRef.current.setTime((newFrame / 30) % clip.duration);
+                      }
+                    }}
+                    style={{ 
+                      padding: "4px 8px", 
+                      backgroundColor: "#374151", 
+                      color: "white", 
+                      border: "none", 
+                      borderRadius: "4px", 
+                      cursor: "pointer" 
+                    }}
+                  >
+                    Next Frame ⏭
+                  </button>
+                  
+                  <div style={{ marginLeft: "10px", display: "flex", alignItems: "center", gap: "8px" }}>
+                    <label style={{ color: "white", fontSize: "12px" }}>Speed:</label>
+                    <input 
+                      type="range" 
+                      min="0.1" 
+                      max="2" 
+                      step="0.1" 
+                      value={animationSpeed} 
+                      onChange={(e) => setAnimationSpeed(parseFloat(e.target.value))}
+                      style={{ width: "100px" }}
+                    />
+                    <span style={{ color: "white", fontSize: "12px" }}>{animationSpeed.toFixed(1)}x</span>
+                  </div>
+                </div>
+                
+                {/* Progress bar */}
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <div style={{ flex: 1, height: "8px", backgroundColor: "#1E293B", borderRadius: "4px", overflow: "hidden" }}>
+                    <div 
+                      style={{ 
+                        width: `${totalFrames > 0 ? (currentFrame / totalFrames) * 100 : 0}%`, 
+                        height: "100%", 
+                        backgroundColor: "#3B82F6",
+                        transition: "width 0.1s ease"
+                      }}
+                    />
+                  </div>
+                  <div style={{ color: "white", fontSize: "12px", whiteSpace: "nowrap" }}>
+                    {currentFrame} / {totalFrames}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Texture Debug Panel */}
